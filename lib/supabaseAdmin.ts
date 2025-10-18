@@ -1,16 +1,15 @@
 // lib/supabaseAdmin.ts
 import { createClient } from "@supabase/supabase-js";
 
-export const SECONDS_PER_DAY = 86400;
-export const NO_EXPIRY_EPOCH = 4102444800; // 2100-01-01 UTC
-
-export const epochSec = (d: Date) => Math.floor(d.getTime() / 1000);
+export const SECONDS_PER_DAY = 86_400;
+export const NO_EXPIRY_EPOCH = 4_102_444_800; // 2100-01-01 UTC (sentinel)
+export const nowEpoch = () => Math.floor(Date.now() / 1000);
 
 export type LicenseRow = {
   id: string;
   code: string;
-  issued_at: number;   // epoch sec
-  expires_at: number;  // epoch sec (o sentinel)
+  issued_at: number;     // epoch seconds (UTC)
+  expires_at: number;    // epoch seconds (UTC) o NO_EXPIRY_EPOCH
   duration_days: number;
   max_uses: number;
   uses: number;
@@ -32,9 +31,5 @@ export function getAdminClient() {
   });
 }
 
-/**
- * Export de compatibilidad:
- * algunos archivos antiguos importaban { supabaseAdmin }.
- * Esto devuelve un cliente admin ya creado.
- */
+// COMPAT: si quedara algún import antiguo
 export const supabaseAdmin = getAdminClient();

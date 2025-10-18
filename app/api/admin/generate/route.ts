@@ -1,67 +1,51 @@
 // app/api/admin/generate/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { randomBytes } from "crypto";
-import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import {
+  getAdminClient,
+  nowEpoch,
+  SECONDS_PER_DAY,
+  NO_EXPIRY_EPOCH,
+} from "@/lib/supabaseAdmin";
+import { requireAdmin } from "@/lib/auth";
 
-// Helpers
-const epochSec = (d: Date) => Math.floor(d.getTime() / 1000);
-const SECONDS_PER_DAY = 86400;
-// Sentinel para “sin caducidad” (2100-01-01)
-const NO_EXPIRY_EPOCH = 4102444800;
-
-// Código aleatorio URL-safe
-function genCode(): string {
-  return randomBytes(24).toString("base64url");
-}
+export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {
   try {
-    // (Si luego quieres protegerlo con auth, lo agregamos después)
+    await requireAdmin(req); // cookie/JWT admin
+
     const body = await req.json().catch(() => ({}));
-    let { count, duration_days, max_uses, notes } = body as {
-      count?: number;
-      duration_days?: number; // 0 = sin caducidad
-      max_uses?: number;
-      notes?: string;
-    };
+    const count = Math.max(1, Number(body.count ?? 1));
+    const duration_days = Math.max(0, Number(body.duration_days ?? 0));
+    const max_uses = Math.max(1, Number(body.max_uses ?? 1));
+    const notes =
+      typeof body.notes === "string" && body.notes.trim().length > 0
+        ? String(body.notes).trim()
+        : null;
 
-    // Saneos y valores por defecto
-    count = Number.isFinite(count) && count! > 0 && count! <= 1000 ? Math.trunc(count!) : 1;
-    duration_days = Number.isFinite(duration_days) && duration_days! >= 0 ? Math.trunc(duration_days!) : 30;
-    max_uses = Number.isFinite(max_uses) && max_uses! > 0 && max_uses! <= 1000 ? Math.trunc(max_uses!) : 1;
-    notes = typeof notes === "string" ? notes.slice(0, 500) : null;
+    const supabase = getAdminClient();
 
-    const now = new Date();
-    const issued_at = epochSec(now);
-    const expires_at =
-      duration_days === 0 ? NO_EXPIRY_EPOCH : issued_at + duration_days * SECONDS_PER_DAY;
+    const issuedAt = nowEpoch();
+    const expiresAt =
+      duration_days > 0 ? issuedAt + duration_days * SECONDS_PER_DAY : NO_EXPIRY_EPOCH;
 
-    // Filas a insertar
-    const rows = Array.from({ length: count }).map(() => ({
-      code: genCode(),
-      issued_at,          // BIGINT (segundos)
-      expires_at,         // BIGINT (segundos)
-      duration_days,      // INTEGER
-      max_uses,           // INTEGER
-      uses: 0,            // INTEGER
-      is_revoked: false,  // BOOLEAN
-      notes,              // TEXT (nullable)
+    const rows = Array.from({ length: count }, () => ({
+      code: randomBytes(24).toString("base64url"),
+      issued_at: issuedAt,
+      expires_at: expiresAt,
+      duration_days,
+      max_uses,
+      uses: 0,
+      is_revoked: false,
+      notes,
     }));
 
-    const { data, error } = await supabaseAdmin
-      .from("licenses")
-      .insert(rows)
-      .select("code, issued_at, expires_at, duration_days, max_uses");
+    const { data, error } = await supabase.from("licenses").insert(rows).select("*");
+    if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 400 });
 
-    if (error) {
-      return NextResponse.json({ ok: false, error: error.message }, { status: 400 });
-    }
-
-    return NextResponse.json({ ok: true, licenses: data }, { status: 201 });
-  } catch (err: any) {
-    return NextResponse.json(
-      { ok: false, error: err?.message ?? "unexpected_error" },
-      { status: 500 }
-    );
+    return NextResponse.json({ ok: true, items: data }, { status: 200 });
+  } catch (e: any) {
+    return NextResponse.json({ ok: false, error: e?.message ?? "unexpected" }, { status: 500 });
   }
 }
