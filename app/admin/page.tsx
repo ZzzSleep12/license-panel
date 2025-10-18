@@ -1,213 +1,144 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { FaKey, FaTrash, FaCheckCircle, FaTimesCircle, FaCopy } from "react-icons/fa";
+import { useEffect, useState } from "react";
 
-type LicenseItem = {
-  id: string;
+type License = {
   code: string;
-  issued_at: number | null;
-  expires_at: number | null;
   max_uses: number;
   uses: number;
-  active: boolean;
-  expired: boolean;
-  exhausted: boolean;
-};
-
-type Metrics = {
-  total: number;
-  active: number;
-  expired: number;
-  exhausted: number;
+  issued_at: string;
+  expires_at: string | null;
+  notes: string | null;
 };
 
 export default function AdminDashboard() {
+  const [data, setData] = useState<License[]>([]);
   const [loading, setLoading] = useState(true);
-  const [items, setItems] = useState<LicenseItem[]>([]);
-  const [metrics, setMetrics] = useState<Metrics>({ total: 0, active: 0, expired: 0, exhausted: 0 });
-  const [q, setQ] = useState("");
-
-  const filtered = useMemo(() => {
-    const s = q.trim().toLowerCase();
-    if (!s) return items;
-    return items.filter((i) => i.code.toLowerCase().includes(s));
-  }, [q, items]);
+  const [error, setError] = useState<string | null>(null);
+  const [filter, setFilter] = useState<"all" | "active" | "expired">("all");
 
   async function load() {
     setLoading(true);
+    setError(null);
     try {
       const res = await fetch("/api/admin/list", { cache: "no-store" });
-      const json = await res.json();
-      if (json?.ok) {
-        setItems(json.items);
-        setMetrics(json.metrics);
-      } else {
-        console.error(json);
-        alert(json?.error ?? "Error cargando licencias");
-      }
-    } catch (e) {
-      console.error(e);
-      alert("Error de red");
+      const j = await res.json();
+      if (!j.ok) throw new Error(j.error || "Error");
+      setData(j.data as License[]);
+    } catch (e: any) {
+      setError(e.message);
     } finally {
       setLoading(false);
     }
   }
 
-  async function revoke(id: string) {
-    if (!confirm("¿Revocar esta licencia? Quedará agotada.")) return;
-    try {
-      const res = await fetch("/api/admin/revoke", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id }),
-      });
-      const json = await res.json();
-      if (json?.ok) {
-        await load();
-      } else {
-        alert(json?.error ?? "No se pudo revocar");
-      }
-    } catch (e) {
-      console.error(e);
-      alert("Error de red");
-    }
+  useEffect(() => { load(); }, []);
+
+  async function revoke(code: string) {
+    if (!confirm(`¿Revocar licencia ${code}?`)) return;
+    const res = await fetch("/api/admin/revoke", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ code })
+    });
+    const j = await res.json();
+    if (!j.ok) return alert(j.error || "Error");
+    await load();
   }
 
-  function copy(text: string) {
-    navigator.clipboard.writeText(text);
-  }
+  const now = Date.now();
+  const shown = data.filter((r) => {
+    const expired = r.expires_at ? new Date(r.expires_at).getTime() < now : false;
+    if (filter === "active") return !expired;
+    if (filter === "expired") return expired;
+    return true;
+  });
 
-  useEffect(() => {
-    load();
-  }, []);
+  const total = data.length;
+  const active = data.filter(r => !r.expires_at || new Date(r.expires_at).getTime() >= now).length;
+  const expired = total - active;
 
   return (
-    <main className="min-h-screen bg-bg text-white p-6">
-      <div className="max-w-6xl mx-auto">
-        <header className="mb-8 flex items-center justify-between">
-          <h1 className="text-3xl font-bold flex items-center gap-3">
-            <FaKey className="text-accent" /> Dashboard de licencias
-          </h1>
-          <a
-            href="/admin/generate"
-            className="bg-accent hover:bg-accent2 transition px-4 py-2 rounded-md font-semibold"
-          >
-            + Generar licencias
-          </a>
-        </header>
+    <div className="max-w-6xl mx-auto px-4 py-10 space-y-8">
+      <div className="grid sm:grid-cols-3 gap-4">
+        <div className="container-card p-5">
+          <div className="text-neutral-400 text-sm">Totales</div>
+          <div className="text-2xl font-bold">{total}</div>
+        </div>
+        <div className="container-card p-5">
+          <div className="text-neutral-400 text-sm">Activas</div>
+          <div className="text-2xl font-bold text-green-400">{active}</div>
+        </div>
+        <div className="container-card p-5">
+          <div className="text-neutral-400 text-sm">Expiradas</div>
+          <div className="text-2xl font-bold text-red-400">{expired}</div>
+        </div>
+      </div>
 
-        {/* Cards de métricas */}
-        <section className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-          <MetricCard title="Totales" value={metrics.total} />
-          <MetricCard title="Activas" value={metrics.active} accent="text-green-400" />
-          <MetricCard title="Expiradas" value={metrics.expired} accent="text-red-400" />
-          <MetricCard title="Agotadas" value={metrics.exhausted} accent="text-yellow-300" />
-        </section>
-
-        {/* Buscador */}
-        <div className="bg-panel border border-border rounded-xl p-4 mb-4">
-          <input
-            className="w-full"
-            placeholder="Buscar por código…"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-          />
+      <div className="container-card p-5">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div>
+            <div className="text-lg font-semibold">Licencias</div>
+            <p className="text-sm text-neutral-400">Administra y revoca códigos.</p>
+          </div>
+          <div className="flex items-center gap-2">
+            <select className="select" value={filter} onChange={e => setFilter(e.target.value as any)}>
+              <option value="all">Todas</option>
+              <option value="active">Solo activas</option>
+              <option value="expired">Solo expiradas</option>
+            </select>
+            <a className="btn-primary" href="/admin/generate">+ Generar</a>
+          </div>
         </div>
 
-        {/* Tabla */}
-        <section className="bg-panel border border-border rounded-xl overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="min-w-[800px] w-full">
-              <thead className="bg-card">
-                <tr className="text-left text-sm text-muted">
-                  <th className="p-3">Código</th>
-                  <th className="p-3">Emitida</th>
-                  <th className="p-3">Expira</th>
-                  <th className="p-3">Usos</th>
-                  <th className="p-3">Estado</th>
-                  <th className="p-3 text-right">Acciones</th>
+        <div className="mt-4 overflow-x-auto">
+          {loading ? (
+            <div className="p-6 text-center text-neutral-400">Cargando...</div>
+          ) : error ? (
+            <div className="p-6 text-center text-red-400">Error: {error}</div>
+          ) : shown.length === 0 ? (
+            <div className="p-6 text-center text-neutral-400">Sin resultados.</div>
+          ) : (
+            <table className="table">
+              <thead>
+                <tr className="tr">
+                  <th className="th">Código</th>
+                  <th className="th">Usos</th>
+                  <th className="th">Emitida</th>
+                  <th className="th">Expira</th>
+                  <th className="th">Notas</th>
+                  <th className="th"></th>
                 </tr>
               </thead>
               <tbody>
-                {loading ? (
-                  <tr>
-                    <td colSpan={6} className="p-6 text-center text-muted">
-                      Cargando…
-                    </td>
-                  </tr>
-                ) : filtered.length === 0 ? (
-                  <tr>
-                    <td colSpan={6} className="p-6 text-center text-muted">
-                      Sin resultados
-                    </td>
-                  </tr>
-                ) : (
-                  filtered.map((x) => (
-                    <tr key={x.id} className="border-t border-border">
-                      <td className="p-3 font-mono">
-                        <div className="flex items-center gap-2">
-                          {x.code}
-                          <button
-                            title="Copiar"
-                            onClick={() => copy(x.code)}
-                            className="p-1 rounded hover:bg-card"
-                          >
-                            <FaCopy />
-                          </button>
-                        </div>
+                {shown.map((r) => {
+                  const expired = r.expires_at ? new Date(r.expires_at).getTime() < now : false;
+                  return (
+                    <tr key={r.code} className="tr">
+                      <td className="td font-mono">{r.code}</td>
+                      <td className="td">
+                        <span className="badge">{r.uses}/{r.max_uses}</span>
                       </td>
-                      <td className="p-3">{fmtDate(x.issued_at)}</td>
-                      <td className="p-3">{fmtDate(x.expires_at)}</td>
-                      <td className="p-3">
-                        {x.uses}/{x.max_uses}
+                      <td className="td">{new Date(r.issued_at).toLocaleString()}</td>
+                      <td className="td">
+                        {r.expires_at ? (
+                          <span className={expired ? "text-red-400" : ""}>
+                            {new Date(r.expires_at).toLocaleString()}
+                          </span>
+                        ) : <span className="text-neutral-400">Sin caducidad</span>}
                       </td>
-                      <td className="p-3">
-                        {x.active ? (
-                          <span className="inline-flex items-center gap-2 text-green-400">
-                            <FaCheckCircle /> Activa
-                          </span>
-                        ) : x.expired ? (
-                          <span className="inline-flex items-center gap-2 text-red-400">
-                            <FaTimesCircle /> Expirada
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-2 text-yellow-300">
-                            <FaTimesCircle /> Agotada
-                          </span>
-                        )}
-                      </td>
-                      <td className="p-3 text-right">
-                        <button
-                          onClick={() => revoke(x.id)}
-                          className="inline-flex items-center gap-2 bg-card hover:bg-border text-white px-3 py-2 rounded-md"
-                        >
-                          <FaTrash /> Revocar
-                        </button>
+                      <td className="td">{r.notes ?? <span className="text-neutral-500">—</span>}</td>
+                      <td className="td text-right">
+                        <button className="btn-danger" onClick={() => revoke(r.code)}>Revocar</button>
                       </td>
                     </tr>
-                  ))
-                )}
+                  );
+                })}
               </tbody>
             </table>
-          </div>
-        </section>
+          )}
+        </div>
       </div>
-    </main>
-  );
-}
-
-function fmtDate(ts: number | null) {
-  if (!ts) return "—";
-  const d = new Date(ts);
-  return d.toLocaleString();
-}
-
-function MetricCard({ title, value, accent }: { title: string; value: number; accent?: string }) {
-  return (
-    <div className="bg-panel border border-border rounded-xl p-5 shadow-soft">
-      <p className="text-sm text-muted">{title}</p>
-      <p className={`text-3xl font-bold mt-1 ${accent ?? ""}`}>{value}</p>
     </div>
   );
 }
