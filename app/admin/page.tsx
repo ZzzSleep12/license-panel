@@ -1,89 +1,213 @@
-import { supabaseAdmin } from "@/lib/supabaseAdmin";
+"use client";
 
-function fmt(ts: number) {
-  const d = new Date(ts * 1000);
-  return d.toISOString().replace("T", " ").replace(".000Z", " UTC");
-}
+import { useEffect, useMemo, useState } from "react";
+import { FaKey, FaTrash, FaCheckCircle, FaTimesCircle, FaCopy } from "react-icons/fa";
 
-export default async function AdminPage() {
-  const now = Math.floor(Date.now() / 1000);
+type LicenseItem = {
+  id: string;
+  code: string;
+  issued_at: number | null;
+  expires_at: number | null;
+  max_uses: number;
+  uses: number;
+  active: boolean;
+  expired: boolean;
+  exhausted: boolean;
+};
 
-  // métricas (sin RPC, consultas simples)
-  const { data: all, error: eAll } = await supabaseAdmin
-    .from("licenses")
-    .select("*")
-    .order("id", { ascending: false })
-    .limit(1000);
-  if (eAll) {
-    return <div>Error cargando datos: {eAll.message}</div>;
+type Metrics = {
+  total: number;
+  active: number;
+  expired: number;
+  exhausted: number;
+};
+
+export default function AdminDashboard() {
+  const [loading, setLoading] = useState(true);
+  const [items, setItems] = useState<LicenseItem[]>([]);
+  const [metrics, setMetrics] = useState<Metrics>({ total: 0, active: 0, expired: 0, exhausted: 0 });
+  const [q, setQ] = useState("");
+
+  const filtered = useMemo(() => {
+    const s = q.trim().toLowerCase();
+    if (!s) return items;
+    return items.filter((i) => i.code.toLowerCase().includes(s));
+  }, [q, items]);
+
+  async function load() {
+    setLoading(true);
+    try {
+      const res = await fetch("/api/admin/list", { cache: "no-store" });
+      const json = await res.json();
+      if (json?.ok) {
+        setItems(json.items);
+        setMetrics(json.metrics);
+      } else {
+        console.error(json);
+        alert(json?.error ?? "Error cargando licencias");
+      }
+    } catch (e) {
+      console.error(e);
+      alert("Error de red");
+    } finally {
+      setLoading(false);
+    }
   }
 
-  const total = all?.length ?? 0;
-  const active = all?.filter((r) => !r.revoked && r.expires_at > now).length ?? 0;
-  const expired = all?.filter((r) => r.expires_at <= now).length ?? 0;
-  const revoked = all?.filter((r) => r.revoked).length ?? 0;
+  async function revoke(id: string) {
+    if (!confirm("¿Revocar esta licencia? Quedará agotada.")) return;
+    try {
+      const res = await fetch("/api/admin/revoke", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
+      });
+      const json = await res.json();
+      if (json?.ok) {
+        await load();
+      } else {
+        alert(json?.error ?? "No se pudo revocar");
+      }
+    } catch (e) {
+      console.error(e);
+      alert("Error de red");
+    }
+  }
+
+  function copy(text: string) {
+    navigator.clipboard.writeText(text);
+  }
+
+  useEffect(() => {
+    load();
+  }, []);
 
   return (
-    <div>
-      <h2>Dashboard</h2>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 12, margin: "12px 0 24px" }}>
-        <Card title="Total" value={String(total)} />
-        <Card title="Activas" value={String(active)} />
-        <Card title="Expiradas" value={String(expired)} />
-        <Card title="Revocadas" value={String(revoked)} />
-      </div>
+    <main className="min-h-screen bg-bg text-white p-6">
+      <div className="max-w-6xl mx-auto">
+        <header className="mb-8 flex items-center justify-between">
+          <h1 className="text-3xl font-bold flex items-center gap-3">
+            <FaKey className="text-accent" /> Dashboard de licencias
+          </h1>
+          <a
+            href="/admin/generate"
+            className="bg-accent hover:bg-accent2 transition px-4 py-2 rounded-md font-semibold"
+          >
+            + Generar licencias
+          </a>
+        </header>
 
-      <a href="/admin/generate">➕ Generar licencias</a>
+        {/* Cards de métricas */}
+        <section className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+          <MetricCard title="Totales" value={metrics.total} />
+          <MetricCard title="Activas" value={metrics.active} accent="text-green-400" />
+          <MetricCard title="Expiradas" value={metrics.expired} accent="text-red-400" />
+          <MetricCard title="Agotadas" value={metrics.exhausted} accent="text-yellow-300" />
+        </section>
 
-      <div style={{ marginTop: 16 }}>
-        <h3>Últimas licencias</h3>
-        <div style={{ overflow: "auto", maxHeight: 520, border: "1px solid #222", borderRadius: 10, padding: 8 }}>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>Código</th>
-                <th>Días</th>
-                <th>Expira</th>
-                <th>Usos</th>
-                <th>Estado</th>
-                <th>Acción</th>
-              </tr>
-            </thead>
-            <tbody>
-              {all?.map((r: any) => (
-                <tr key={r.id} style={{ borderTop: "1px solid #222" }}>
-                  <td>{r.id}</td>
-                  <td style={{ fontFamily: "monospace" }}>{r.code}</td>
-                  <td>{r.days}</td>
-                  <td>{fmt(r.expires_at)}</td>
-                  <td>
-                    {r.uses}/{r.max_uses === 0 ? "∞" : r.max_uses}
-                  </td>
-                  <td>{r.revoked ? "revocado" : r.expires_at > now ? "activo" : "expirado"}</td>
-                  <td>
-                    {!r.revoked && (
-                      <form action="/api/admin/revoke" method="post">
-                        <input type="hidden" name="id" value={r.id} />
-                        <button>Revocar</button>
-                      </form>
-                    )}
-                  </td>
-                </tr>
-              )) ?? null}
-            </tbody>
-          </table>
+        {/* Buscador */}
+        <div className="bg-panel border border-border rounded-xl p-4 mb-4">
+          <input
+            className="w-full"
+            placeholder="Buscar por código…"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+          />
         </div>
+
+        {/* Tabla */}
+        <section className="bg-panel border border-border rounded-xl overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="min-w-[800px] w-full">
+              <thead className="bg-card">
+                <tr className="text-left text-sm text-muted">
+                  <th className="p-3">Código</th>
+                  <th className="p-3">Emitida</th>
+                  <th className="p-3">Expira</th>
+                  <th className="p-3">Usos</th>
+                  <th className="p-3">Estado</th>
+                  <th className="p-3 text-right">Acciones</th>
+                </tr>
+              </thead>
+              <tbody>
+                {loading ? (
+                  <tr>
+                    <td colSpan={6} className="p-6 text-center text-muted">
+                      Cargando…
+                    </td>
+                  </tr>
+                ) : filtered.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="p-6 text-center text-muted">
+                      Sin resultados
+                    </td>
+                  </tr>
+                ) : (
+                  filtered.map((x) => (
+                    <tr key={x.id} className="border-t border-border">
+                      <td className="p-3 font-mono">
+                        <div className="flex items-center gap-2">
+                          {x.code}
+                          <button
+                            title="Copiar"
+                            onClick={() => copy(x.code)}
+                            className="p-1 rounded hover:bg-card"
+                          >
+                            <FaCopy />
+                          </button>
+                        </div>
+                      </td>
+                      <td className="p-3">{fmtDate(x.issued_at)}</td>
+                      <td className="p-3">{fmtDate(x.expires_at)}</td>
+                      <td className="p-3">
+                        {x.uses}/{x.max_uses}
+                      </td>
+                      <td className="p-3">
+                        {x.active ? (
+                          <span className="inline-flex items-center gap-2 text-green-400">
+                            <FaCheckCircle /> Activa
+                          </span>
+                        ) : x.expired ? (
+                          <span className="inline-flex items-center gap-2 text-red-400">
+                            <FaTimesCircle /> Expirada
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-2 text-yellow-300">
+                            <FaTimesCircle /> Agotada
+                          </span>
+                        )}
+                      </td>
+                      <td className="p-3 text-right">
+                        <button
+                          onClick={() => revoke(x.id)}
+                          className="inline-flex items-center gap-2 bg-card hover:bg-border text-white px-3 py-2 rounded-md"
+                        >
+                          <FaTrash /> Revocar
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
       </div>
-    </div>
+    </main>
   );
 }
 
-function Card({ title, value }: { title: string; value: string }) {
+function fmtDate(ts: number | null) {
+  if (!ts) return "—";
+  const d = new Date(ts);
+  return d.toLocaleString();
+}
+
+function MetricCard({ title, value, accent }: { title: string; value: number; accent?: string }) {
   return (
-    <div style={{ background: "#13161a", padding: 16, borderRadius: 12 }}>
-      <div style={{ opacity: 0.7 }}>{title}</div>
-      <div style={{ fontSize: 28, fontWeight: 700 }}>{value}</div>
+    <div className="bg-panel border border-border rounded-xl p-5 shadow-soft">
+      <p className="text-sm text-muted">{title}</p>
+      <p className={`text-3xl font-bold mt-1 ${accent ?? ""}`}>{value}</p>
     </div>
   );
 }

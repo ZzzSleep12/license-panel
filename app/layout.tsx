@@ -1,3 +1,5 @@
+import "./globals.css";
+
 export const metadata = {
   title: "License Panel",
   description: "Panel de licencias"
