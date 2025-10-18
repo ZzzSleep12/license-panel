@@ -1,18 +1,37 @@
-import { NextResponse, NextRequest } from "next/server";
+// middleware.ts
+import { NextRequest, NextResponse } from "next/server";
 
-// protege todo /admin: exige cookie de sesión (sb-access-token) creada por Supabase Auth
-export function middleware(req: NextRequest) {
-  if (req.nextUrl.pathname.startsWith("/admin")) {
-    const hasSession =
-      req.cookies.has("sb-access-token") || req.cookies.has("sb-refresh-token");
-    if (!hasSession) {
-      const login = new URL("/login", req.url);
-      return NextResponse.redirect(login);
+export async function middleware(req: NextRequest) {
+  const { pathname } = req.nextUrl;
+
+  // Permitir login y el endpoint público /api/validate
+  if (
+    pathname.startsWith("/login") ||
+    pathname.startsWith("/api/validate") ||
+    pathname === "/"
+  ) {
+    return NextResponse.next();
+  }
+
+  // Proteger /admin/* y /api/admin/*
+  if (pathname.startsWith("/admin") || pathname.startsWith("/api/admin")) {
+    const token =
+      req.cookies.get("sb-access-token")?.value ||
+      req.cookies.get("sb:token")?.value ||
+      req.cookies.get("access-token")?.value ||
+      null;
+
+    if (!token) {
+      const url = req.nextUrl.clone();
+      url.pathname = "/login";
+      url.searchParams.set("next", pathname);
+      return NextResponse.redirect(url);
     }
   }
+
   return NextResponse.next();
 }
 
 export const config = {
-  matcher: ["/admin/:path*"]
+  matcher: ["/admin/:path*", "/api/admin/:path*"],
 };

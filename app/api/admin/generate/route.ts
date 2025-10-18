@@ -1,38 +1,44 @@
-import { NextResponse } from "next/server";
-import { z } from "zod";
-import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import crypto from "crypto";
+import { NextRequest, NextResponse } from "next/server";
+import { createClient } from "@supabase/supabase-js";
+import crypto from "node:crypto";
+import { assertAdmin } from "@/lib/auth";
 
-function makeCode(n = 32) {
-  return crypto.randomBytes(n).toString("base64url");
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
+);
+
+function newCode(len = 40) {
+  return crypto.randomBytes(Math.ceil(len / 2)).toString("hex").slice(0, len);
 }
 
-export async function POST(req: Request) {
-  // Esta ruta está protegida por middleware: requiere sesión (sb-access-token)
-  const Schema = z.object({
-    days: z.number().int().positive(),
-    max_uses: z.number().int().min(0),
-    count: z.number().int().positive().max(200)
-  });
+export async function POST(req: NextRequest) {
+  try {
+    await assertAdmin(req);
 
-  const body = await req.json().catch(() => ({}));
-  const parsed = Schema.safeParse(body);
-  if (!parsed.success) return NextResponse.json({ ok: false, error: "invalid params" }, { status: 400 });
+    const { amount, days, maxUses } = await req.json();
 
-  const { days, max_uses, count } = parsed.data;
-  const now = Math.floor(Date.now() / 1000);
-  const rows = [];
-  const codes: string[] = [];
+    const n = Math.max(1, Math.min(Number(amount ?? 1), 200));
+    const d = Math.max(1, Math.min(Number(days ?? 30), 3650));
+    const mu = Math.max(1, Math.min(Number(maxUses ?? 1), 1000));
 
-  for (let i = 0; i < count; i++) {
-    const code = makeCode(32);
-    const expires = now + days * 24 * 3600;
-    rows.push({ code, days, issued_at: now, expires_at: expires, revoked: false, max_uses, uses: 0 });
-    codes.push(code);
+    const now = new Date();
+    const expires = new Date(now.getTime() + d * 24 * 60 * 60 * 1000);
+
+    const rows = Array.from({ length: n }).map(() => ({
+      code: newCode(40),
+      issued_at: now.toISOString(),
+      expires_at: expires.toISOString(),
+      max_uses: mu,
+      uses: 0,
+    }));
+
+    const { data, error } = await supabase.from("licenses").insert(rows).select("id, code");
+    if (error) throw error;
+
+    return NextResponse.json({ ok: true, created: data });
+  } catch (e: any) {
+    const status = e?.status ?? 500;
+    return NextResponse.json({ ok: false, error: e.message ?? "error" }, { status });
   }
-
-  const { error } = await supabaseAdmin.from("licenses").insert(rows);
-  if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 400 });
-
-  return NextResponse.json({ ok: true, codes });
 }
