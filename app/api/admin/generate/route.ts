@@ -1,44 +1,48 @@
-import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
-import crypto from "node:crypto";
-import { assertAdmin } from "@/lib/auth";
+// app/api/admin/generate/route.ts
+import { NextResponse } from 'next/server';
+import { getAdminClient } from '@/lib/supabaseAdmin';
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
+export const dynamic = 'force-dynamic';
 
-function newCode(len = 40) {
-  return crypto.randomBytes(Math.ceil(len / 2)).toString("hex").slice(0, len);
-}
-
-export async function POST(req: NextRequest) {
+export async function POST(req: Request) {
   try {
-    await assertAdmin(req);
+    const supabase = getAdminClient();
+    const body = await req.json().catch(() => ({}));
 
-    const { amount, days, maxUses } = await req.json();
-
-    const n = Math.max(1, Math.min(Number(amount ?? 1), 200));
-    const d = Math.max(1, Math.min(Number(days ?? 30), 3650));
-    const mu = Math.max(1, Math.min(Number(maxUses ?? 1), 1000));
+    const amount = Number(body.amount ?? 1);
+    const days = Number(body.days ?? 30);
+    const maxUses = Number(body.maxUses ?? 1);
+    const notes = (body.notes ?? null) as string | null;
 
     const now = new Date();
-    const expires = new Date(now.getTime() + d * 24 * 60 * 60 * 1000);
+    const expires = days > 0 ? new Date(now.getTime() + days * 86400 * 1000) : null;
 
-    const rows = Array.from({ length: n }).map(() => ({
-      code: newCode(40),
-      issued_at: now.toISOString(),
-      expires_at: expires.toISOString(),
-      max_uses: mu,
-      uses: 0,
-    }));
+    // Generar códigos
+    const codes: string[] = [];
+    const rows = Array.from({ length: amount }).map(() => {
+      const code = crypto.randomUUID().replace(/-/g, '').slice(0, 32);
+      codes.push(code);
+      return {
+        code,
+        max_uses: maxUses,
+        uses: 0,
+        issued_at: now.toISOString(),
+        expires_at: expires ? expires.toISOString() : null,
+        notes,
+      };
+    });
 
-    const { data, error } = await supabase.from("licenses").insert(rows).select("id, code");
-    if (error) throw error;
+    const { error } = await supabase.from('licenses').insert(rows);
+    if (error) {
+      return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+    }
 
-    return NextResponse.json({ ok: true, created: data });
+    return NextResponse.json({
+      ok: true,
+      codes,
+      expires_at: expires ? expires.toISOString() : null,
+    });
   } catch (e: any) {
-    const status = e?.status ?? 500;
-    return NextResponse.json({ ok: false, error: e.message ?? "error" }, { status });
+    return NextResponse.json({ ok: false, error: e.message ?? 'unknown' }, { status: 500 });
   }
 }

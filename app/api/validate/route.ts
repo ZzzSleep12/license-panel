@@ -1,36 +1,60 @@
-import { NextResponse } from "next/server";
-import { z } from "zod";
-import { supabaseAdmin } from "@/lib/supabaseAdmin";
+// app/api/validate/route.ts
+import { NextResponse } from 'next/server';
+import { getAdminClient } from '@/lib/supabaseAdmin';
+
+export const dynamic = 'force-dynamic';
 
 export async function POST(req: Request) {
-  const Schema = z.object({ code: z.string().min(8), hwid: z.string().optional() });
-  const body = await req.json().catch(() => ({}));
-  const parsed = Schema.safeParse(body);
-  if (!parsed.success) return NextResponse.json({ ok: false, reason: "bad request" }, { status: 400 });
-  const { code } = parsed.data;
+  try {
+    const { code } = await req.json();
+    if (!code) {
+      return NextResponse.json({ ok: false, error: 'code required' }, { status: 400 });
+    }
 
-  const { data: rows, error } = await supabaseAdmin.from("licenses").select("*").eq("code", code).limit(1);
-  if (error) return NextResponse.json({ ok: false, reason: "server error" }, { status: 500 });
-  const row = rows?.[0];
-  if (!row) return NextResponse.json({ ok: false, reason: "invalid code" }, { status: 404 });
-  if (row.revoked) return NextResponse.json({ ok: false, reason: "revoked" }, { status: 403 });
+    const supabase = getAdminClient();
 
-  const now = Math.floor(Date.now() / 1000);
-  if (row.expires_at < now) return NextResponse.json({ ok: false, reason: "expired", expires_at: row.expires_at }, { status: 403 });
+    const { data, error } = await supabase
+      .from('licenses')
+      .select('*')
+      .eq('code', code)
+      .maybeSingle();
 
-  if (row.max_uses > 0 && row.uses >= row.max_uses) {
-    return NextResponse.json({ ok: false, reason: "max_uses_exceeded" }, { status: 403 });
+    if (error) {
+      return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+    }
+    if (!data) {
+      return NextResponse.json({ ok: false, error: 'invalid' }, { status: 404 });
+    }
+
+    const now = new Date();
+    if (data.expires_at && new Date(data.expires_at) < now) {
+      return NextResponse.json({ ok: false, error: 'expired' }, { status: 403 });
+    }
+    if (data.uses >= data.max_uses) {
+      return NextResponse.json({ ok: false, error: 'max-used' }, { status: 403 });
+    }
+
+    const { error: upErr } = await supabase
+      .from('licenses')
+      .update({ uses: data.uses + 1 })
+      .eq('code', code);
+
+    if (upErr) {
+      return NextResponse.json({ ok: false, error: upErr.message }, { status: 500 });
+    }
+
+    const ttl_seconds = data.expires_at
+      ? Math.floor((new Date(data.expires_at).getTime() - now.getTime()) / 1000)
+      : null;
+
+    return NextResponse.json({
+      ok: true,
+      expires_at: data.expires_at,
+      ttl_seconds,
+      max_uses: data.max_uses,
+      uses: data.uses + 1,
+    });
+  } catch (e: any) {
+    return NextResponse.json({ ok: false, error: e.message ?? 'unknown' }, { status: 500 });
   }
-
-  const { error: updErr } = await supabaseAdmin.from("licenses").update({ uses: row.uses + 1 }).eq("id", row.id);
-  if (updErr) return NextResponse.json({ ok: false, reason: "server error" }, { status: 500 });
-
-  return NextResponse.json({
-    ok: true,
-    expires_at: row.expires_at,
-    issued_at: row.issued_at,
-    days: row.days,
-    uses: row.uses + 1,
-    max_uses: row.max_uses
-  });
 }
