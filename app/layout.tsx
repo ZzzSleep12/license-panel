@@ -21,6 +21,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 <a className="hover:underline" href="/">Inicio</a>
                 <a className="hover:underline" href="/admin">Dashboard</a>
                 <a className="hover:underline" href="/admin/generate">Generar</a>
+                <form action="/api/auth/logout" method="post">
+                  <button className="btn">Salir</button>
+                </form>
               </nav>
             </div>
           </header>

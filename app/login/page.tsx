@@ -1,39 +1,60 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 export default function LoginPage() {
-  const [email, setEmail] = useState("");
+  const [username, setUsername] = useState("admin");
+  const [password, setPassword] = useState("Papasconsal12");
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setErr(null);
+    setLoading(true);
+    try {
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username, password })
+      });
+      const j = await res.json();
+      if (!j.ok) throw new Error(j.error || "Credenciales inválidas");
+      const next = new URLSearchParams(window.location.search).get("next") || "/admin";
+      window.location.href = next;
+    } catch (e: any) {
+      setErr(e.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    // Nada por ahora
+  }, []);
 
   return (
-    <main className="min-h-screen bg-bg flex items-center justify-center">
-      <div className="bg-panel border border-border rounded-2xl shadow-soft p-8 w-[380px]">
-        <h2 className="text-2xl font-semibold text-center mb-4">🔐 Login Admin</h2>
-
-        <p className="text-muted text-sm mb-4 text-center">
-          Introduce tu correo de administrador para recibir el enlace mágico.
+    <div className="min-h-[70vh] flex items-center justify-center px-4">
+      <div className="container-card w-full max-w-md p-6">
+        <h1 className="text-2xl font-semibold mb-2">Acceso administrador</h1>
+        <p className="text-sm text-neutral-400 mb-6">
+          Ingresa con tu usuario y contraseña.
         </p>
-
-        <form className="space-y-4">
-          <input
-            type="email"
-            placeholder="admin@tudominio.com"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            className="w-full"
-          />
-          <button
-            type="submit"
-            className="w-full bg-accent hover:bg-accent2 text-white py-2 rounded-md transition"
-          >
-            Enviar enlace
+        <form onSubmit={onSubmit} className="space-y-4">
+          <div>
+            <label className="label">Usuario</label>
+            <input className="input" value={username} onChange={e => setUsername(e.target.value)} autoFocus />
+          </div>
+          <div>
+            <label className="label">Contraseña</label>
+            <input className="input" type="password" value={password} onChange={e => setPassword(e.target.value)} />
+          </div>
+          {err && <div className="text-red-400 text-sm">{err}</div>}
+          <button className="btn-primary w-full" disabled={loading}>
+            {loading ? "Entrando..." : "Entrar"}
           </button>
         </form>
-
-        <p className="text-center text-xs text-muted mt-4">
-          Asegúrate de haber agregado tu correo como admin en Supabase → Authentication → Users.
-        </p>
       </div>
-    </main>
+    </div>
   );
 }

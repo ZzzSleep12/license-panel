@@ -17,6 +17,10 @@ export default function AdminDashboard() {
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<"all" | "active" | "expired">("all");
 
+  // nuevo: crear admin
+  const [newUser, setNewUser] = useState("");
+  const [newPass, setNewPass] = useState("");
+
   async function load() {
     setLoading(true);
     setError(null);
@@ -46,6 +50,21 @@ export default function AdminDashboard() {
     await load();
   }
 
+  async function createAdmin(e: React.FormEvent) {
+    e.preventDefault();
+    if (!newUser || !newPass) return alert("Escribe usuario y contraseña");
+    const res = await fetch("/api/admin/users/create", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username: newUser, password: newPass })
+    });
+    const j = await res.json();
+    if (!j.ok) return alert(j.error || "No se pudo crear");
+    alert("Admin creado");
+    setNewUser("");
+    setNewPass("");
+  }
+
   const now = Date.now();
   const shown = data.filter((r) => {
     const expired = r.expires_at ? new Date(r.expires_at).getTime() < now : false;
@@ -60,6 +79,8 @@ export default function AdminDashboard() {
 
   return (
     <div className="max-w-6xl mx-auto px-4 py-10 space-y-8">
+
+      {/* Tarjetas resumen */}
       <div className="grid sm:grid-cols-3 gap-4">
         <div className="container-card p-5">
           <div className="text-neutral-400 text-sm">Totales</div>
@@ -75,6 +96,26 @@ export default function AdminDashboard() {
         </div>
       </div>
 
+      {/* Crear nuevos administradores */}
+      <div className="container-card p-6">
+        <div className="text-lg font-semibold mb-4">Crear nuevo administrador</div>
+        <form onSubmit={createAdmin} className="grid sm:grid-cols-3 gap-4">
+          <div>
+            <label className="label">Usuario</label>
+            <input className="input" value={newUser} onChange={e => setNewUser(e.target.value)} placeholder="usuario" />
+          </div>
+          <div>
+            <label className="label">Contraseña</label>
+            <input className="input" type="password" value={newPass} onChange={e => setNewPass(e.target.value)} placeholder="contraseña" />
+          </div>
+          <div className="sm:flex sm:items-end">
+            <button className="btn-primary w-full">Crear</button>
+          </div>
+        </form>
+        <p className="text-xs text-neutral-400 mt-3">Consejo: usa contraseñas fuertes; podrás compartir este usuario con otros admins de confianza.</p>
+      </div>
+
+      {/* Licencias */}
       <div className="container-card p-5">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
           <div>
@@ -112,7 +153,7 @@ export default function AdminDashboard() {
               </thead>
               <tbody>
                 {shown.map((r) => {
-                  const expired = r.expires_at ? new Date(r.expires_at).getTime() < now : false;
+                  const isExpired = r.expires_at ? new Date(r.expires_at).getTime() < now : false;
                   return (
                     <tr key={r.code} className="tr">
                       <td className="td font-mono">{r.code}</td>
@@ -122,7 +163,7 @@ export default function AdminDashboard() {
                       <td className="td">{new Date(r.issued_at).toLocaleString()}</td>
                       <td className="td">
                         {r.expires_at ? (
-                          <span className={expired ? "text-red-400" : ""}>
+                          <span className={isExpired ? "text-red-400" : ""}>
                             {new Date(r.expires_at).toLocaleString()}
                           </span>
                         ) : <span className="text-neutral-400">Sin caducidad</span>}

@@ -1,56 +1,76 @@
-// lib/auth.ts
+import jwt from "jsonwebtoken";
 import { cookies } from "next/headers";
-import { NextRequest } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { getAdminClient } from "@/lib/supabaseAdmin";
 
-/**
- * Devuelve el email del usuario autenticado si el access token es válido.
- * Usa el endpoint de Auth con la Service Role Key para validar el token.
- */
-export async function getUserEmailFromCookie(): Promise<string | null> {
-  const c = await cookies();
-  // Supabase helpers suelen guardar estos nombres (depende de la lib usada).
-  const token =
-    c.get("sb-access-token")?.value ||
-    c.get("sb:token")?.value ||
-    c.get("access-token")?.value ||
-    null;
+const COOKIE_NAME = "session";
+const MAX_AGE_SECONDS = 7 * 24 * 60 * 60; // 7 días
 
+export type SessionPayload = { sub: string; username: string; role: "admin" };
+
+export function signSession(payload: SessionPayload) {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) throw new Error("Missing JWT_SECRET");
+  return jwt.sign(payload, secret, { expiresIn: MAX_AGE_SECONDS });
+}
+
+export function verifySession(token: string): SessionPayload | null {
+  try {
+    const secret = process.env.JWT_SECRET!;
+    return jwt.verify(token, secret) as SessionPayload;
+  } catch {
+    return null;
+  }
+}
+
+export async function getSession(): Promise<SessionPayload | null> {
+  const cookieStore = await cookies();
+  const token = cookieStore.get(COOKIE_NAME)?.value;
   if (!token) return null;
+  return verifySession(token);
+}
 
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-  );
+export async function setSessionCookie(payload: SessionPayload) {
+  const token = signSession(payload);
+  const cookieStore = await cookies();
+  cookieStore.set({
+    name: COOKIE_NAME,
+    value: token,
+    httpOnly: true,
+    sameSite: "lax",
+    path: "/",
+    secure: process.env.NODE_ENV === "production",
+    maxAge: MAX_AGE_SECONDS
+  });
+}
 
-  // Usa la API de Auth para resolver el usuario desde el token
-  const { data, error } = await supabase.auth.getUser(token);
-  if (error || !data?.user?.email) return null;
-  return data.user.email.toLowerCase();
+export async function clearSessionCookie() {
+  const cookieStore = await cookies();
+  cookieStore.set({
+    name: COOKIE_NAME,
+    value: "",
+    httpOnly: true,
+    sameSite: "lax",
+    path: "/",
+    secure: process.env.NODE_ENV === "production",
+    maxAge: 0
+  });
 }
 
 /**
- * Lanza error si el usuario no está autenticado como admin.
- * Admins permitidos: lista separada por comas en ALLOWED_ADMINS
+ * Seed automático: si no hay admins, crea 'admin' / 'Papasconsal12'
  */
-export async function assertAdmin(_req?: NextRequest) {
-  const email = await getUserEmailFromCookie();
-  if (!email) {
-    const err: any = new Error("UNAUTHENTICATED");
-    err.status = 401;
-    throw err;
+export async function ensureSeedAdmin() {
+  const supabase = getAdminClient();
+  const { data, error } = await supabase.from("admins").select("id").limit(1);
+  if (error) throw new Error(error.message);
+
+  if (!data || data.length === 0) {
+    const bcrypt = await import("bcryptjs");
+    const hash = await bcrypt.hash("Papasconsal12", 10);
+    const { error: insErr } = await supabase.from("admins").insert({
+      username: "admin",
+      password_hash: hash
+    });
+    if (insErr) throw new Error(insErr.message);
   }
-
-  const allowed = (process.env.ALLOWED_ADMINS ?? "")
-    .split(",")
-    .map((s) => s.trim().toLowerCase())
-    .filter(Boolean);
-
-  if (!allowed.includes(email)) {
-    const err: any = new Error("FORBIDDEN");
-    err.status = 403;
-    throw err;
-  }
-
-  return email;
 }
