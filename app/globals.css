@@ -1,0 +1,10 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root { color-scheme: dark; }
+html, body { height: 100%; background: #0b0f14; color: #e6eef7; }
+
+input, select, textarea { @apply bg-card border border-border rounded-md px-3 py-2 outline-none text-sm text-white; }
+button { @apply rounded-md px-3 py-2 text-sm font-medium; }
+a { @apply text-accent hover:underline; }
