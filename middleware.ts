@@ -1,55 +1,36 @@
-import { NextResponse } from "next/server";
-import type { NextRequest } from "next/server";
-import { verifySession } from "@/lib/auth";
+import { NextRequest, NextResponse } from "next/server";
+import { verifyJwt } from "@/lib/jwt";
 
 export async function middleware(req: NextRequest) {
-  const { pathname } = req.nextUrl;
-
-  const isProtectedPage =
-    pathname.startsWith("/admin") ||
-    pathname.startsWith("/api/admin");
-
-  const isAuthRoute =
-    pathname.startsWith("/api/auth/") ||
-    pathname === "/login" ||
-    pathname.startsWith("/_next") ||
-    pathname.startsWith("/api/validate") || // público para el cliente desktop
-    pathname.startsWith("/favicon") ||
-    pathname.startsWith("/static") ||
-    pathname === "/";
-
-  if (!isProtectedPage) {
-    return NextResponse.next();
-  }
+  const { pathname, search } = req.nextUrl;
+  const token = req.cookies.get("auth")?.value || null;
+  const session = token ? await verifyJwt<{ role?: string }>(token) : null;
+  const isAdmin = !!session && session.role === "admin";
 
   // Rutas protegidas
-  const token = req.cookies.get("session")?.value;
-  if (!token) {
-    // si es API admin -> 401; si es página -> redirect a /login
-    if (pathname.startsWith("/api/")) {
-      return NextResponse.json({ ok: false, error: "unauthorized" }, { status: 401 });
-    } else {
-      const url = req.nextUrl.clone();
-      url.pathname = "/login";
-      url.searchParams.set("next", pathname);
-      return NextResponse.redirect(url);
-    }
+  const needsAuth =
+    pathname.startsWith("/admin") || pathname.startsWith("/api/admin");
+
+  // Si ya logueado e intenta ir a /login, lo mandamos al dashboard
+  if (pathname === "/login" && isAdmin) {
+    const url = req.nextUrl.clone();
+    url.pathname = "/admin";
+    url.search = "";
+    return NextResponse.redirect(url);
   }
 
-  const session = verifySession(token);
-  if (!session || session.role !== "admin") {
-    if (pathname.startsWith("/api/")) {
-      return NextResponse.json({ ok: false, error: "forbidden" }, { status: 403 });
-    } else {
-      const url = req.nextUrl.clone();
-      url.pathname = "/login";
-      return NextResponse.redirect(url);
-    }
+  // Si necesita auth y no es admin -> redirigir a login
+  if (needsAuth && !isAdmin) {
+    const url = req.nextUrl.clone();
+    url.pathname = "/login";
+    url.search = `?next=${encodeURIComponent(pathname + (search || ""))}`;
+    return NextResponse.redirect(url);
   }
 
+  // Para todo lo demás, continuar
   return NextResponse.next();
 }
 
 export const config = {
-  matcher: ["/admin/:path*", "/api/:path*"]
+  matcher: ["/login", "/admin/:path*", "/api/admin/:path*"],
 };
