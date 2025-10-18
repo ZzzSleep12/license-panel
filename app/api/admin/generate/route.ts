@@ -1,39 +1,68 @@
-import { NextResponse } from "next/server";
-import { getAdminClient } from "@/lib/supabaseAdmin";
+import { NextRequest, NextResponse } from "next/server";
+import { randomBytes } from "crypto";
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { verifyAdminFromRequest } from "@/lib/auth"; // si ya tienes auth por JWT/cookie
 
-export const dynamic = "force-dynamic";
+// Helpers
+const epochSec = (d: Date) => Math.floor(d.getTime() / 1000);
+const SECONDS_PER_DAY = 86400;
 
-export async function POST(req: Request) {
+// Si quieres “sin caducidad”, usamos 2100-01-01 como sentinel
+const NO_EXPIRY_EPOCH = 4102444800; // 2100-01-01T00:00:00Z
+
+// Genera un código seguro base64-url
+function genCode(): string {
+  return randomBytes(24).toString("base64url");
+}
+
+export async function POST(req: NextRequest) {
   try {
-    const supabase = getAdminClient();
+    // (Opcional) verifica que sea admin logueado
+    // Si todavía no usas JWT/cookies, puedes omitir esta línea.
+    await verifyAdminFromRequest(req);
+
     const body = await req.json().catch(() => ({}));
-    const amount = Math.max(1, parseInt(body.amount ?? "1"));
-    const days = Math.max(0, parseInt(body.days ?? "30"));
-    const maxUses = Math.max(1, parseInt(body.maxUses ?? "1"));
-    const notes = (body.notes ?? null) as string | null;
+    let { count, duration_days, max_uses, notes } = body as {
+      count?: number;
+      duration_days?: number; // 0 = sin caducidad
+      max_uses?: number;
+      notes?: string;
+    };
+
+    // Defaults y saneo
+    count = Number.isFinite(count) && count! > 0 && count! <= 1000 ? Math.trunc(count!) : 1;
+    duration_days = Number.isFinite(duration_days) && duration_days! >= 0 ? Math.trunc(duration_days!) : 30;
+    max_uses = Number.isFinite(max_uses) && max_uses! > 0 && max_uses! <= 1000 ? Math.trunc(max_uses!) : 1;
+    notes = typeof notes === "string" ? notes.slice(0, 500) : null;
 
     const now = new Date();
-    const expires = days > 0 ? new Date(now.getTime() + days * 86400 * 1000) : null;
+    const issued_at = epochSec(now);
+    const expires_at =
+      duration_days === 0 ? NO_EXPIRY_EPOCH : issued_at + duration_days * SECONDS_PER_DAY;
 
-    const codes: string[] = [];
-    const rows = Array.from({ length: amount }).map(() => {
-      const code = crypto.randomUUID().replace(/-/g, "").slice(0, 32);
-      codes.push(code);
-      return {
-        code,
-        max_uses: maxUses,
-        uses: 0,
-        issued_at: now.toISOString(),
-        expires_at: expires ? expires.toISOString() : null,
-        notes
-      };
-    });
+    // Prepara filas a insertar
+    const rows = Array.from({ length: count }).map(() => ({
+      code: genCode(),
+      issued_at,                // BIGINT (segundos)
+      expires_at,               // BIGINT (segundos)
+      duration_days,            // INTEGER
+      max_uses,                 // INTEGER
+      uses: 0,                  // INTEGER
+      is_revoked: false,        // BOOLEAN
+      notes,                    // TEXT (puede ser null)
+    }));
 
-    const { error } = await supabase.from("licenses").insert(rows);
-    if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+    const { data, error } = await supabaseAdmin
+      .from("licenses")
+      .insert(rows)
+      .select("code, issued_at, expires_at, duration_days, max_uses");
 
-    return NextResponse.json({ ok: true, codes, expires_at: expires ? expires.toISOString() : null });
-  } catch (e: any) {
-    return NextResponse.json({ ok: false, error: e.message || "unknown" }, { status: 500 });
+    if (error) {
+      return NextResponse.json({ ok: false, error: error.message }, { status: 400 });
+    }
+
+    return NextResponse.json({ ok: true, licenses: data }, { status: 201 });
+  } catch (err: any) {
+    return NextResponse.json({ ok: false, error: err?.message ?? "unexpected_error" }, { status: 500 });
   }
 }
