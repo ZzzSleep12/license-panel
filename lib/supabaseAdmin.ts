@@ -1,3 +1,4 @@
+// lib/supabaseAdmin.ts
 import { createClient } from "@supabase/supabase-js";
 
 export const SECONDS_PER_DAY = 86400;
@@ -30,3 +31,10 @@ export function getAdminClient() {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 }
+
+/**
+ * Export de compatibilidad:
+ * algunos archivos antiguos importaban { supabaseAdmin }.
+ * Esto devuelve un cliente admin ya creado.
+ */
+export const supabaseAdmin = getAdminClient();
