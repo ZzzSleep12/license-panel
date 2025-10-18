@@ -20,12 +20,19 @@ export async function GET(req: NextRequest) {
   try {
     await assertAdmin(req);
 
-    const { data, error } = await supabase
-      .from<LicenseRow>("licenses")
-      .select("*")
-      .order("issued_at", { ascending: false });
+const { data, error } = await supabase
+  .from("licenses")
+  .select("*")
+  .order("issued_at", { ascending: false });
 
-    if (error) throw error;
+if (error) {
+  return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+}
+
+// Si quieres mantener tipos, castea aquí:
+const rows = (data ?? []) as LicenseRow[];
+return NextResponse.json({ ok: true, data: rows });
+
 
     const now = Date.now();
 
