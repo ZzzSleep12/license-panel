@@ -1,89 +1,104 @@
-"use client";
+// app/admin/generate/page.tsx
+import Link from "next/link";
 
-import { useState } from "react";
+export const dynamic = "force-dynamic";
 
 export default function GeneratePage() {
-  const [qty, setQty] = useState(1);
-  const [days, setDays] = useState(30);
-  const [maxPerCode, setMaxPerCode] = useState(1);
-  const [notes, setNotes] = useState("");
-  const [loading, setLoading] = useState(false);
+  async function onSubmit(formData: FormData) {
+    "use server"; // Mantiene esto como Server Action para POST directo
 
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setLoading(true);
-    try {
-      const res = await fetch("/api/admin/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        // IMPORTANTE: envía cookies de sesión
-        credentials: "include",
-        body: JSON.stringify({
-          qty: Number(qty),
-          duration_days: Number(days),
-          max_uses: Number(maxPerCode),
-          notes: notes || null,
-        }),
-      });
-      const json = await res.json();
-      if (!res.ok || !json.ok) throw new Error(json.error || "Unauthorized");
-      alert(`Generados: ${json.codes?.length ?? 0} códigos`);
-    } catch (err: any) {
-      alert(err?.message || "Error");
-    } finally {
-      setLoading(false);
+    const count = Number(formData.get("count") ?? 1);
+    const durationDays = Number(formData.get("durationDays") ?? 0);
+    const maxUses = Number(formData.get("maxUses") ?? 1);
+    const notes = String(formData.get("notes") ?? "");
+
+    // Llamamos al endpoint interno
+    const res = await fetch(`${process.env.NEXT_PUBLIC_SITE_URL ?? ""}/api/admin/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      // En server action tenemos credenciales de la request actual (cookie admin)
+      body: JSON.stringify({ count, durationDays, maxUses, notes }),
+    });
+
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      throw new Error(j?.error || "No se pudo generar");
     }
-  };
+
+    // Mostramos un alert en el cliente con JS embebido
+    // (simple; si usas toasts en client component, puedes mejorarlo)
+    return (
+      <script
+        dangerouslySetInnerHTML={{
+          __html: `alert("Generados: ${j.generated} códigos"); window.location.href="/admin";`,
+        }}
+      />
+    );
+  }
 
   return (
-    <div className="max-w-2xl mx-auto px-4 py-8">
-      <h1 className="text-xl font-semibold mb-4">Generar licencias</h1>
-      <form onSubmit={submit} className="grid gap-4">
-        <label className="grid gap-1">
-          <span className="text-sm opacity-70">Cantidad</span>
+    <div className="max-w-xl mx-auto space-y-6">
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-semibold">Generar licencias</h1>
+        <Link
+          href="/admin"
+          className="rounded-md bg-neutral-800 px-3 py-2 border border-neutral-700 hover:bg-neutral-700"
+        >
+          ← Volver
+        </Link>
+      </div>
+
+      <form action={onSubmit} className="space-y-4 rounded-xl border border-neutral-800 bg-neutral-900 p-5">
+        <div className="space-y-1">
+          <label className="text-sm text-neutral-300">Cantidad</label>
           <input
+            name="count"
             type="number"
             min={1}
-            value={qty}
-            onChange={(e) => setQty(Number(e.target.value))}
-            className="rounded border border-white/10 bg-black/20 px-3 py-2 outline-none"
+            max={100}
+            defaultValue={1}
+            className="w-full rounded-md bg-neutral-800 px-3 py-2 outline-none border border-neutral-700 focus:border-neutral-500"
           />
-        </label>
-        <label className="grid gap-1">
-          <span className="text-sm opacity-70">Duración (días) — 0 = sin caducidad</span>
+        </div>
+
+        <div className="space-y-1">
+          <label className="text-sm text-neutral-300">
+            Duración (días) — 0 = sin caducidad
+          </label>
           <input
+            name="durationDays"
             type="number"
             min={0}
-            value={days}
-            onChange={(e) => setDays(Number(e.target.value))}
-            className="rounded border border-white/10 bg-black/20 px-3 py-2 outline-none"
+            defaultValue={30}
+            className="w-full rounded-md bg-neutral-800 px-3 py-2 outline-none border border-neutral-700 focus:border-neutral-500"
           />
-        </label>
-        <label className="grid gap-1">
-          <span className="text-sm opacity-70">Usos máx. por código</span>
+        </div>
+
+        <div className="space-y-1">
+          <label className="text-sm text-neutral-300">Usos máx. por código</label>
           <input
+            name="maxUses"
             type="number"
             min={1}
-            value={maxPerCode}
-            onChange={(e) => setMaxPerCode(Number(e.target.value))}
-            className="rounded border border-white/10 bg-black/20 px-3 py-2 outline-none"
+            defaultValue={1}
+            className="w-full rounded-md bg-neutral-800 px-3 py-2 outline-none border border-neutral-700 focus:border-neutral-500"
           />
-        </label>
-        <label className="grid gap-1">
-          <span className="text-sm opacity-70">Notas (opcional)</span>
+        </div>
+
+        <div className="space-y-1">
+          <label className="text-sm text-neutral-300">Notas (opcional)</label>
           <input
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
+            name="notes"
             placeholder="Ej: Plan mensual"
-            className="rounded border border-white/10 bg-black/20 px-3 py-2 outline-none"
+            className="w-full rounded-md bg-neutral-800 px-3 py-2 outline-none border border-neutral-700 focus:border-neutral-500"
           />
-        </label>
+        </div>
 
         <button
-          disabled={loading}
-          className="rounded bg-blue-600 hover:bg-blue-700 px-4 py-2 text-sm disabled:opacity-50"
+          type="submit"
+          className="w-full rounded-md bg-blue-600 px-4 py-2 hover:bg-blue-500"
         >
-          {loading ? "Generando..." : "Generar"}
+          Generar
         </button>
       </form>
     </div>

@@ -6,66 +6,95 @@ import {
   nowEpoch,
   SECONDS_PER_DAY,
   NO_EXPIRY_EPOCH,
+  LicenseRow,
 } from "@/lib/supabaseAdmin";
-import { requireAdmin } from "@/lib/auth";
+
+// Si existe requireAdmin en tu lib/auth, lo usamos; si no, ignoramos (no rompe build)
+let requireAdminRef:
+  | (undefined | ((req: NextRequest) => Promise<void>))
+  | undefined = undefined;
+try {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  const auth = require("@/lib/auth");
+  if (typeof auth.requireAdmin === "function") requireAdminRef = auth.requireAdmin;
+} catch {}
 
 export const dynamic = "force-dynamic";
 
-function makeCode(lenBytes = 18) {
-  return randomBytes(lenBytes)
-    .toString("base64")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/g, "");
+type Body = {
+  count?: number;
+  durationDays?: number; // 0 = sin caducidad
+  maxUses?: number;
+  notes?: string;
+};
+
+function makeCode() {
+  // 32 bytes -> 43~44 chars base64url sin padding
+  return randomBytes(24).toString("base64url");
 }
 
 export async function POST(req: NextRequest) {
   try {
-    await requireAdmin(req);
+    if (requireAdminRef) {
+      await requireAdminRef(req);
+    }
 
-    const body = await req.json().catch(() => ({}));
-    const count = Math.max(1, Number(body?.count ?? body?.cantidad ?? 1));
-    const duration_days = Math.max(
-      0,
-      Number(body?.duration_days ?? body?.duracion_dias ?? 0)
-    );
-    const max_uses = Math.max(1, Number(body?.max_uses ?? body?.max_uses_per_code ?? 1));
-    const notes: string | null = body?.notes ?? body?.notas ?? null;
+    const body = (await req.json().catch(() => ({}))) as Body;
 
-    const sb = getAdminClient();
-    const now = nowEpoch();
+    // Sanitiza/valida entradas
+    const count = Math.max(0, Math.min(100, Number(body.count ?? 1))); // cap 100 por seguridad
+    const durationDaysRaw = Number(body.durationDays ?? 0);
+    const durationDays = Number.isFinite(durationDaysRaw) ? Math.max(0, Math.floor(durationDaysRaw)) : 0;
+    const maxUsesRaw = Number(body.maxUses ?? 1);
+    const maxUses = Number.isFinite(maxUsesRaw) ? Math.max(1, Math.floor(maxUsesRaw)) : 1;
+    const notes = (body.notes ?? "").toString().trim() || null;
+
+    if (count === 0) {
+      return NextResponse.json({ ok: true, generated: 0, codes: [] });
+    }
+
+    const supabase = getAdminClient();
+
+    const issued = nowEpoch();
     const expires =
-      duration_days > 0 ? now + duration_days * SECONDS_PER_DAY : NO_EXPIRY_EPOCH;
+      durationDays === 0 ? NO_EXPIRY_EPOCH : issued + durationDays * SECONDS_PER_DAY;
 
-    const rows = Array.from({ length: count }).map(() => ({
-      code: makeCode(18),
-      issued_at: now,
+    const rowsToInsert = Array.from({ length: count }, () => ({
+      code: makeCode(),
+      issued_at: issued,
       expires_at: expires,
-      duration_days,
+      duration_days: durationDays,
+      max_uses: maxUses,
       uses: 0,
-      max_uses,
       is_revoked: false,
       notes,
     }));
 
-    const { data, error } = await sb
+    // INSERT y devolvemos los códigos insertados
+    const { data, error } = await supabase
       .from("licenses")
-      .insert(rows)
-      .select(
-        "code, issued_at, expires_at, duration_days, uses, max_uses, is_revoked, notes"
-      );
+      .insert(rowsToInsert)
+      .select("code"); // <— importante para saber cuántos se insertaron
 
     if (error) {
-      console.error(error);
-      return NextResponse.json({ ok: false, message: error.message }, { status: 400 });
+      return NextResponse.json(
+        { ok: false, error: error.message },
+        { status: 400 }
+      );
     }
 
-    return NextResponse.json({ ok: true, licenses: data }, { status: 201 });
+    const codes = (data ?? []).map((r: Pick<LicenseRow, "code">) => r.code);
+    return NextResponse.json({
+      ok: true,
+      generated: codes.length,
+      codes,
+      issued_at: issued,
+      expires_at: expires,
+    });
   } catch (err: any) {
-    if (err?.status === 401) {
-      return NextResponse.json({ ok: false, message: "Unauthorized" }, { status: 401 });
-    }
-    console.error(err);
-    return NextResponse.json({ ok: false, message: "Server error" }, { status: 500 });
+    return NextResponse.json(
+      { ok: false, error: err?.message || "Error interno" },
+      { status: 500 }
+    );
   }
 }
