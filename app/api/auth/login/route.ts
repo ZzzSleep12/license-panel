@@ -1,48 +1,62 @@
 // app/api/auth/login/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import bcrypt from "bcryptjs";
-import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { adminCookie, signAdminJWT } from "@/lib/auth";
+import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
+import bcrypt from "bcryptjs";
+
+export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {
   try {
-    const { username, password } = await req.json();
+    const body = await req.json().catch(() => ({}));
+    const username = String(body?.username ?? body?.user ?? "").trim();
+    const password = String(body?.password ?? body?.pass ?? "").trim();
 
     if (!username || !password) {
-      return NextResponse.json({ ok: false, message: "Missing credentials" }, { status: 400 });
+      return NextResponse.json(
+        { ok: false, message: "Usuario y contraseña son requeridos" },
+        { status: 400 }
+      );
     }
 
-    const { data: admin, error } = await supabaseAdmin
+    const sb = getSupabaseAdmin();
+    const { data: admin, error } = await sb
       .from("admins")
       .select("id, username, password_hash, is_active")
       .eq("username", username)
       .maybeSingle();
 
     if (error || !admin || !admin.is_active) {
-      return NextResponse.json({ ok: false, message: "Invalid credentials" }, { status: 401 });
+      return NextResponse.json(
+        { ok: false, message: "Credenciales inválidas" },
+        { status: 401 }
+      );
     }
 
-    const valid = await bcrypt.compare(password, admin.password_hash);
-    if (!valid) {
-      return NextResponse.json({ ok: false, message: "Invalid credentials" }, { status: 401 });
+    const ok = await bcrypt.compare(password, admin.password_hash);
+    if (!ok) {
+      return NextResponse.json(
+        { ok: false, message: "Credenciales inválidas" },
+        { status: 401 }
+      );
     }
 
-    // Firmamos JWT y lo guardamos en cookie httpOnly
+    // Firmamos JWT con { sub, username }
     const token = await signAdminJWT({ sub: admin.id, username: admin.username });
 
     const res = NextResponse.json({ ok: true });
     res.cookies.set({
-      name: adminCookie.name,
+      name: adminCookie,
       value: token,
       httpOnly: true,
       secure: true,
       sameSite: "lax",
       path: "/",
-      maxAge: adminCookie.maxAge, // por ejemplo 7 días
+      maxAge: 60 * 60 * 24 * 30, // 30 días
     });
     return res;
-  } catch (e) {
-    console.error(e);
+  } catch (err) {
+    console.error(err);
     return NextResponse.json({ ok: false, message: "Server error" }, { status: 500 });
   }
 }

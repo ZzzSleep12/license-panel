@@ -1,63 +1,71 @@
+// lib/auth.ts
 import { cookies } from "next/headers";
 import { NextRequest } from "next/server";
 import { SignJWT, jwtVerify } from "jose";
 
-const COOKIE_NAME = "ADMIN_SESSION";
-const JWT_SECRET = new TextEncoder().encode(
-  process.env.ADMIN_JWT_SECRET || "dev-secret-change-me"
-);
+export const adminCookie = "lp_admin";
 
-type AdminClaims = { sub: string; role: "admin" };
+const ADMIN_JWT_SECRET = process.env.ADMIN_JWT_SECRET;
+if (!ADMIN_JWT_SECRET) {
+  throw new Error("Missing env ADMIN_JWT_SECRET");
+}
+const secretKey = new TextEncoder().encode(ADMIN_JWT_SECRET);
 
-export async function signAdminJWT(username: string, ttlSeconds = 60 * 60 * 6) {
-  // 6h por defecto
-  const now = Math.floor(Date.now() / 1000);
-  const token = await new SignJWT({ role: "admin" } as AdminClaims)
+/** Firma un JWT para el admin (expira en 30 días) */
+export async function signAdminJWT(payload: { sub: string; username: string }) {
+  const token = await new SignJWT(payload)
     .setProtectedHeader({ alg: "HS256", typ: "JWT" })
-    .setSubject(username)
-    .setIssuedAt(now)
-    .setExpirationTime(now + ttlSeconds)
-    .sign(JWT_SECRET);
+    .setIssuedAt()
+    .setExpirationTime("30d")
+    .sign(secretKey);
   return token;
 }
 
-export async function verifyAdminJWT(token: string) {
-  const { payload } = await jwtVerify(token, JWT_SECRET, { algorithms: ["HS256"] });
-  if (payload.role !== "admin" || !payload.sub) throw new Error("forbidden");
-  return payload as unknown as AdminClaims;
-}
-
-export function getAdminTokenFromRequest(req?: NextRequest) {
-  // Con App Router, cookies() funciona en handlers/server components
-  const c = cookies().get(COOKIE_NAME)?.value;
-  if (c) return c;
-
-  // Fallback por si lo llamas pasando req explícito:
-  const raw = req?.headers.get("cookie") || "";
-  const parts = raw.split(/;\s*/);
-  for (const p of parts) {
-    const [k, ...rest] = p.split("=");
-    if (k === COOKIE_NAME) return rest.join("=");
+/** Verifica el token del admin desde un Request (cookie httpOnly) */
+export async function verifyAdminFromRequest(req: NextRequest) {
+  const cookie = req.cookies.get(adminCookie)?.value;
+  if (!cookie) return null;
+  try {
+    const { payload } = await jwtVerify(cookie, secretKey, {
+      algorithms: ["HS256"],
+    });
+    // payload.sub y payload.username deberían existir
+    if (!payload?.sub || typeof payload.sub !== "string") return null;
+    return {
+      sub: payload.sub as string,
+      username: (payload as any).username as string | undefined,
+    };
+  } catch {
+    return null;
   }
-  return undefined;
 }
 
-export async function requireAdmin(req?: NextRequest) {
-  const token = getAdminTokenFromRequest(req);
-  if (!token) throw new Error("unauthorized");
-  const payload = await verifyAdminJWT(token);
-  return payload.sub; // username
+/** Lanza 401 si no hay admin válido (para proteger endpoints) */
+export async function requireAdmin(req: NextRequest) {
+  const admin = await verifyAdminFromRequest(req);
+  if (!admin) {
+    const e: any = new Error("Unauthorized");
+    e.status = 401;
+    throw e;
+  }
+  return admin;
 }
 
-export const adminCookie = {
-  name: COOKIE_NAME,
-  // opciones para NextResponse.cookies.set
-  options: {
-    httpOnly: true,
-    sameSite: "lax" as const,
-    secure: process.env.NODE_ENV === "production",
-    path: "/",
-    // maxAge 7 días
-    maxAge: 60 * 60 * 24 * 7,
-  },
-};
+/** Obtiene el admin desde cookies (para componentes server) */
+export async function getAdminFromCookies() {
+  const jar = await cookies();
+  const token = jar.get(adminCookie)?.value;
+  if (!token) return null;
+  try {
+    const { payload } = await jwtVerify(token, secretKey, {
+      algorithms: ["HS256"],
+    });
+    if (!payload?.sub || typeof payload.sub !== "string") return null;
+    return {
+      sub: payload.sub as string,
+      username: (payload as any).username as string | undefined,
+    };
+  } catch {
+    return null;
+  }
+}
