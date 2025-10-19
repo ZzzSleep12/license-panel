@@ -7,12 +7,11 @@ import {
   SECONDS_PER_DAY,
   NO_EXPIRY_EPOCH,
 } from "@/lib/supabaseAdmin";
-import { requireAdmin } from "@/lib/auth"; // mantiene la protección admin
+import { requireAdmin } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
 function makeCode(lenBytes = 18) {
-  // base64url sin padding -> códigos cortos y seguros
   return randomBytes(lenBytes)
     .toString("base64")
     .replace(/\+/g, "-")
@@ -22,7 +21,6 @@ function makeCode(lenBytes = 18) {
 
 export async function POST(req: NextRequest) {
   try {
-    // Verifica cookie/JWT de admin (no se quita esta función)
     await requireAdmin(req);
 
     const body = await req.json().catch(() => ({}));
@@ -36,13 +34,13 @@ export async function POST(req: NextRequest) {
 
     const sb = getAdminClient();
     const now = nowEpoch();
-    const exp =
+    const expires =
       duration_days > 0 ? now + duration_days * SECONDS_PER_DAY : NO_EXPIRY_EPOCH;
 
     const rows = Array.from({ length: count }).map(() => ({
       code: makeCode(18),
       issued_at: now,
-      expires_at: exp,
+      expires_at: expires,
       duration_days,
       uses: 0,
       max_uses,
@@ -53,7 +51,9 @@ export async function POST(req: NextRequest) {
     const { data, error } = await sb
       .from("licenses")
       .insert(rows)
-      .select("code, issued_at, expires_at, max_uses, uses, duration_days, is_revoked");
+      .select(
+        "code, issued_at, expires_at, duration_days, uses, max_uses, is_revoked, notes"
+      );
 
     if (error) {
       console.error(error);

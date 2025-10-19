@@ -8,24 +8,34 @@ export const dynamic = "force-dynamic";
 export async function POST(req: NextRequest) {
   try {
     await requireAdmin(req);
-    const { code } = await req.json();
-    if (!code) return NextResponse.json({ ok: false, error: "Falta 'code'" }, { status: 400 });
 
-    const supabase = getAdminClient();
+    const body = await req.json().catch(() => ({}));
+    const code: string = String(body?.code ?? body?.licencia ?? "").trim();
 
-    const { data, error } = await supabase
+    if (!code) {
+      return NextResponse.json(
+        { ok: false, message: "Missing code" },
+        { status: 400 }
+      );
+    }
+
+    const sb = getAdminClient();
+    const { error } = await sb
       .from("licenses")
       .update({ is_revoked: true })
-      .eq("code", code)
-      .neq("is_revoked", true)
-      .select("code")
-      .single();
+      .eq("code", code);
 
-    if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 400 });
-    if (!data) return NextResponse.json({ ok: false, error: "No se encontró o ya estaba revocada" }, { status: 404 });
+    if (error) {
+      console.error(error);
+      return NextResponse.json({ ok: false, message: error.message }, { status: 400 });
+    }
 
     return NextResponse.json({ ok: true });
-  } catch (e: any) {
-    return NextResponse.json({ ok: false, error: e?.message ?? "unexpected" }, { status: 500 });
+  } catch (err: any) {
+    if (err?.status === 401) {
+      return NextResponse.json({ ok: false, message: "Unauthorized" }, { status: 401 });
+    }
+    console.error(err);
+    return NextResponse.json({ ok: false, message: "Server error" }, { status: 500 });
   }
 }

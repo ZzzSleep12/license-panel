@@ -1,24 +1,36 @@
 // app/api/admin/list/route.ts
-import { NextResponse } from "next/server";
-import { getAdminClient, NO_EXPIRY_EPOCH } from "@/lib/supabaseAdmin";
+import { NextRequest, NextResponse } from "next/server";
+import { getAdminClient } from "@/lib/supabaseAdmin";
 import { requireAdmin } from "@/lib/auth";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(req: NextRequest) {
   try {
-    await requireAdmin();
+    await requireAdmin(req);
+
     const supabase = getAdminClient();
     const { data, error } = await supabase
       .from("licenses")
-      .select("*")
+      .select(
+        "code, issued_at, expires_at, duration_days, uses, max_uses, is_revoked, notes"
+      )
       .order("issued_at", { ascending: false });
 
-    if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 400 });
+    if (error) {
+      console.error(error);
+      return NextResponse.json(
+        { ok: false, message: error.message },
+        { status: 400 }
+      );
+    }
 
-    // devolvemos tal cual (epoch seconds), la UI los formatea
-    return NextResponse.json({ ok: true, items: data, sentinel: NO_EXPIRY_EPOCH });
-  } catch (e: any) {
-    return NextResponse.json({ ok: false, error: e?.message ?? "unexpected" }, { status: 500 });
+    return NextResponse.json({ ok: true, licenses: data ?? [] });
+  } catch (err: any) {
+    if (err?.status === 401) {
+      return NextResponse.json({ ok: false, message: "Unauthorized" }, { status: 401 });
+    }
+    console.error(err);
+    return NextResponse.json({ ok: false, message: "Server error" }, { status: 500 });
   }
 }
