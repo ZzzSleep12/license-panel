@@ -7,45 +7,65 @@ import {
   SECONDS_PER_DAY,
   NO_EXPIRY_EPOCH,
 } from "@/lib/supabaseAdmin";
-import { requireAdmin } from "@/lib/auth";
+import { requireAdmin } from "@/lib/auth"; // mantiene la protección admin
 
 export const dynamic = "force-dynamic";
 
+function makeCode(lenBytes = 18) {
+  // base64url sin padding -> códigos cortos y seguros
+  return randomBytes(lenBytes)
+    .toString("base64")
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/g, "");
+}
+
 export async function POST(req: NextRequest) {
   try {
-    await requireAdmin(req); // cookie/JWT admin
+    // Verifica cookie/JWT de admin (no se quita esta función)
+    await requireAdmin(req);
 
     const body = await req.json().catch(() => ({}));
-    const count = Math.max(1, Number(body.count ?? 1));
-    const duration_days = Math.max(0, Number(body.duration_days ?? 0));
-    const max_uses = Math.max(1, Number(body.max_uses ?? 1));
-    const notes =
-      typeof body.notes === "string" && body.notes.trim().length > 0
-        ? String(body.notes).trim()
-        : null;
+    const count = Math.max(1, Number(body?.count ?? body?.cantidad ?? 1));
+    const duration_days = Math.max(
+      0,
+      Number(body?.duration_days ?? body?.duracion_dias ?? 0)
+    );
+    const max_uses = Math.max(1, Number(body?.max_uses ?? body?.max_uses_per_code ?? 1));
+    const notes: string | null = body?.notes ?? body?.notas ?? null;
 
-    const supabase = getAdminClient();
+    const sb = getAdminClient();
+    const now = nowEpoch();
+    const exp =
+      duration_days > 0 ? now + duration_days * SECONDS_PER_DAY : NO_EXPIRY_EPOCH;
 
-    const issuedAt = nowEpoch();
-    const expiresAt =
-      duration_days > 0 ? issuedAt + duration_days * SECONDS_PER_DAY : NO_EXPIRY_EPOCH;
-
-    const rows = Array.from({ length: count }, () => ({
-      code: randomBytes(24).toString("base64url"),
-      issued_at: issuedAt,
-      expires_at: expiresAt,
+    const rows = Array.from({ length: count }).map(() => ({
+      code: makeCode(18),
+      issued_at: now,
+      expires_at: exp,
       duration_days,
-      max_uses,
       uses: 0,
+      max_uses,
       is_revoked: false,
       notes,
     }));
 
-    const { data, error } = await supabase.from("licenses").insert(rows).select("*");
-    if (error) return NextResponse.json({ ok: false, error: error.message }, { status: 400 });
+    const { data, error } = await sb
+      .from("licenses")
+      .insert(rows)
+      .select("code, issued_at, expires_at, max_uses, uses, duration_days, is_revoked");
 
-    return NextResponse.json({ ok: true, items: data }, { status: 200 });
-  } catch (e: any) {
-    return NextResponse.json({ ok: false, error: e?.message ?? "unexpected" }, { status: 500 });
+    if (error) {
+      console.error(error);
+      return NextResponse.json({ ok: false, message: error.message }, { status: 400 });
+    }
+
+    return NextResponse.json({ ok: true, licenses: data }, { status: 201 });
+  } catch (err: any) {
+    if (err?.status === 401) {
+      return NextResponse.json({ ok: false, message: "Unauthorized" }, { status: 401 });
+    }
+    console.error(err);
+    return NextResponse.json({ ok: false, message: "Server error" }, { status: 500 });
   }
 }
