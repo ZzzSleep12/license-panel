@@ -1,76 +1,49 @@
-import jwt from "jsonwebtoken";
+// lib/auth.ts
+import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
-import { getAdminClient } from "@/lib/supabaseAdmin";
 
-const COOKIE_NAME = "session";
-const MAX_AGE_SECONDS = 7 * 24 * 60 * 60; // 7 días
+const ADMIN_COOKIE = "admin_auth";
+const COOKIE_SECRET = process.env.ADMIN_COOKIE_SECRET || "dev-secret-cookie";
 
-export type SessionPayload = { sub: string; username: string; role: "admin" };
-
-export function signSession(payload: SessionPayload) {
-  const secret = process.env.JWT_SECRET;
-  if (!secret) throw new Error("Missing JWT_SECRET");
-  return jwt.sign(payload, secret, { expiresIn: MAX_AGE_SECONDS });
+// ¿El request viene con cookie de admin válida?
+export function isAdmin(req?: NextRequest): boolean {
+  const val = req
+    ? req.cookies.get(ADMIN_COOKIE)?.value
+    : cookies().get(ADMIN_COOKIE)?.value;
+  return val === COOKIE_SECRET;
 }
 
-export function verifySession(token: string): SessionPayload | null {
-  try {
-    const secret = process.env.JWT_SECRET!;
-    return jwt.verify(token, secret) as SessionPayload;
-  } catch {
-    return null;
+// Lánzalo en APIs protegidas. Si no hay admin => throw (se captura en el route).
+export function requireAdmin(req?: NextRequest) {
+  if (!isAdmin(req)) {
+    throw new Error("Unauthorized");
   }
 }
 
-export async function getSession(): Promise<SessionPayload | null> {
-  const cookieStore = await cookies();
-  const token = cookieStore.get(COOKIE_NAME)?.value;
-  if (!token) return null;
-  return verifySession(token);
-}
-
-export async function setSessionCookie(payload: SessionPayload) {
-  const token = signSession(payload);
-  const cookieStore = await cookies();
-  cookieStore.set({
-    name: COOKIE_NAME,
-    value: token,
+// Para el login: setear cookie httpOnly con el “secreto”
+export function setAdminCookie(res: NextResponse) {
+  res.cookies.set({
+    name: ADMIN_COOKIE,
+    value: COOKIE_SECRET,
     httpOnly: true,
     sameSite: "lax",
     path: "/",
     secure: process.env.NODE_ENV === "production",
-    maxAge: MAX_AGE_SECONDS
+    maxAge: 60 * 60 * 24 * 7, // 7 días
   });
+  return res;
 }
 
-export async function clearSessionCookie() {
-  const cookieStore = await cookies();
-  cookieStore.set({
-    name: COOKIE_NAME,
+// Para el logout
+export function clearAdminCookie(res: NextResponse) {
+  res.cookies.set({
+    name: ADMIN_COOKIE,
     value: "",
     httpOnly: true,
     sameSite: "lax",
     path: "/",
     secure: process.env.NODE_ENV === "production",
-    maxAge: 0
+    maxAge: 0,
   });
-}
-
-/**
- * Seed automático: si no hay admins, crea 'admin' / 'Papasconsal12'
- */
-export async function ensureSeedAdmin() {
-  const supabase = getAdminClient();
-  const { data, error } = await supabase.from("admins").select("id").limit(1);
-  if (error) throw new Error(error.message);
-
-  if (!data || data.length === 0) {
-    const bcrypt = await import("bcryptjs");
-    const hash = await bcrypt.hash("Papasconsal12", 10);
-    const { error: insErr } = await supabase.from("admins").insert({
-      username: "admin",
-      password_hash: hash
-    });
-    if (insErr) throw new Error(insErr.message);
-  }
+  return res;
 }
