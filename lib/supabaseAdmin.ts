@@ -1,35 +1,56 @@
 // lib/supabaseAdmin.ts
-import { createClient } from "@supabase/supabase-js";
+import { createClient, SupabaseClient } from "@supabase/supabase-js";
 
-export const SECONDS_PER_DAY = 86_400;
-export const NO_EXPIRY_EPOCH = 4_102_444_800; // 2100-01-01 UTC (sentinel)
-export const nowEpoch = () => Math.floor(Date.now() / 1000);
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const SERVICE_ROLE = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
+// Lanzamos error en build si faltan vars
+if (!SUPABASE_URL || !SERVICE_ROLE) {
+  throw new Error(
+    "Missing Supabase admin env vars (NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY)"
+  );
+}
+
+// Cliente singleton para no recrearlo en cada request
+let _adminClient: SupabaseClient | null = null;
+
+/**
+ * Devuelve el cliente de admin (service role).
+ * Mantengo este nombre porque algunos archivos lo importaban así.
+ */
+export function getSupabaseAdmin(): SupabaseClient {
+  if (_adminClient) return _adminClient;
+  _adminClient = createClient(SUPABASE_URL, SERVICE_ROLE, {
+    auth: { persistSession: false },
+    global: { headers: { "X-Client-Info": "license-panel-admin" } },
+  });
+  return _adminClient;
+}
+
+/**
+ * Alias exportado (algunos archivos usaban `supabaseAdmin`).
+ * Así evitamos errores de “no exportado”.
+ */
+export const supabaseAdmin: SupabaseClient = getSupabaseAdmin();
+
+/** Tipos que usa el panel */
 export type LicenseRow = {
   id: string;
   code: string;
-  issued_at: number;     // epoch seconds (UTC)
-  expires_at: number;    // epoch seconds (UTC) o NO_EXPIRY_EPOCH
-  duration_days: number;
-  max_uses: number;
+  issued_at: number;      // epoch seconds (UTC)
+  expires_at: number;     // epoch seconds (UTC)
+  duration_days: number;  // 0 = sin caducidad
   uses: number;
+  max_uses: number;
   is_revoked: boolean;
   notes: string | null;
-  created_at?: string;
+  created_at: string;     // timestamptz
 };
 
-export function getAdminClient() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-  if (!url || !serviceKey) {
-    throw new Error(
-      "Faltan env vars (NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY)"
-    );
-  }
-  return createClient(url, serviceKey, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
-}
-
-// COMPAT: si quedara algún import antiguo
-export const supabaseAdmin = getAdminClient();
+export type AdminRow = {
+  id: string;
+  username: string;
+  password_hash: string;
+  is_active: boolean;
+  created_at: string;
+};

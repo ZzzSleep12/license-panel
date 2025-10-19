@@ -1,49 +1,48 @@
+// app/api/auth/login/route.ts
 import { NextRequest, NextResponse } from "next/server";
-import { adminCookie, signAdminJWT } from "@/lib/auth";
-import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
 import bcrypt from "bcryptjs";
+import { supabaseAdmin } from "@/lib/supabaseAdmin";
+import { adminCookie, signAdminJWT } from "@/lib/auth";
 
 export async function POST(req: NextRequest) {
   try {
     const { username, password } = await req.json();
 
     if (!username || !password) {
-      return NextResponse.json({ ok: false, error: "missing" }, { status: 400 });
+      return NextResponse.json({ ok: false, message: "Missing credentials" }, { status: 400 });
     }
 
-    // 1) Usuario maestro por variables de entorno (fallback)
-    const envUser = process.env.ADMIN_USER || "admin";
-    const envPass = process.env.ADMIN_PASS || "Papasconsal12";
-    let ok = false;
+    const { data: admin, error } = await supabaseAdmin
+      .from("admins")
+      .select("id, username, password_hash, is_active")
+      .eq("username", username)
+      .maybeSingle();
 
-    if (username === envUser && password === envPass) {
-      ok = true;
-    } else {
-      // 2) O buscar en tabla admins (username único) con hash bcrypt
-      const supabase = getSupabaseAdmin();
-      const { data, error } = await supabase
-        .from("admins")
-        .select("username, password_hash")
-        .eq("username", username)
-        .maybeSingle();
-      if (!error && data?.password_hash) {
-        ok = await bcrypt.compare(password, data.password_hash);
-      }
+    if (error || !admin || !admin.is_active) {
+      return NextResponse.json({ ok: false, message: "Invalid credentials" }, { status: 401 });
     }
 
-    if (!ok) {
-      return NextResponse.json({ ok: false, error: "invalid" }, { status: 401 });
+    const valid = await bcrypt.compare(password, admin.password_hash);
+    if (!valid) {
+      return NextResponse.json({ ok: false, message: "Invalid credentials" }, { status: 401 });
     }
 
-    const token = await signAdminJWT(username);
+    // Firmamos JWT y lo guardamos en cookie httpOnly
+    const token = await signAdminJWT({ sub: admin.id, username: admin.username });
+
     const res = NextResponse.json({ ok: true });
     res.cookies.set({
       name: adminCookie.name,
       value: token,
-      ...adminCookie.options,
+      httpOnly: true,
+      secure: true,
+      sameSite: "lax",
+      path: "/",
+      maxAge: adminCookie.maxAge, // por ejemplo 7 días
     });
     return res;
   } catch (e) {
-    return NextResponse.json({ ok: false, error: "server" }, { status: 500 });
+    console.error(e);
+    return NextResponse.json({ ok: false, message: "Server error" }, { status: 500 });
   }
 }
