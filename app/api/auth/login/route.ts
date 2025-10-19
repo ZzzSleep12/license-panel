@@ -9,8 +9,8 @@ export const dynamic = "force-dynamic";
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json().catch(() => ({}));
-    const username = String(body?.username ?? body?.user ?? "").trim();
-    const password = String(body?.password ?? body?.pass ?? "").trim();
+    const username = String(body?.username ?? "").trim();
+    const password = String(body?.password ?? "").trim();
 
     if (!username || !password) {
       return NextResponse.json(
@@ -49,7 +49,8 @@ export async function POST(req: NextRequest) {
       name: adminCookie,
       value: token,
       httpOnly: true,
-      secure: true,
+      // MUY IMPORTANTE: solo secure en producción para que en localhost se guarde la cookie
+      secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
       path: "/",
       maxAge: 60 * 60 * 24 * 30, // 30 días

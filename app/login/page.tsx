@@ -1,3 +1,4 @@
+// app/login/page.tsx
 "use client";
 
 import { useState } from "react";
@@ -5,75 +6,80 @@ import { useState } from "react";
 export default function LoginPage() {
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
+  const [loading, setLoading]   = useState(false);
+  const [error, setError]       = useState<string | null>(null);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setErr(null);
+    setError(null);
     setLoading(true);
     try {
       const res = await fetch("/api/auth/login", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "content-type": "application/json" },
         body: JSON.stringify({ username, password }),
-        cache: "no-store",
       });
-      const j = await res.json();
-      if (!j.ok) throw new Error(j.error || "Credenciales inválidas");
-      const next = new URLSearchParams(window.location.search).get("next") || "/admin";
-      window.location.href = next;
-    } catch (e: any) {
-      setErr(e.message);
-    } finally {
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data?.ok) {
+        setError(data?.message || "Error al iniciar sesión");
+        setLoading(false);
+        return;
+      }
+      // Cookie httpOnly ya se guardó; redirigimos al dashboard:
+      window.location.href = "/admin";
+    } catch (err) {
+      console.error(err);
+      setError("Error de red");
       setLoading(false);
     }
   }
 
   return (
-    <div className="min-h-[70vh] flex items-center justify-center px-4">
-      <div className="container-card w-full max-w-md p-6">
-        <h1 className="text-2xl font-semibold mb-2">Acceso administrador</h1>
-        <p className="text-sm text-neutral-400 mb-6">
-          Ingresa tu usuario y contraseña.
-        </p>
+    <div className="min-h-dvh flex items-center justify-center bg-neutral-950 text-neutral-100 p-4">
+      <form
+        onSubmit={onSubmit}
+        className="w-full max-w-sm space-y-4 bg-neutral-900 border border-neutral-800 rounded-xl p-6"
+      >
+        <h1 className="text-xl font-semibold">Panel — Iniciar sesión</h1>
 
-        <form onSubmit={onSubmit} className="space-y-4" autoComplete="off">
-          {/* Campos “honeypot” invisibles para desactivar autofill agresivo de algunos navegadores */}
-          <input type="text" name="fake-user" className="hidden" autoComplete="username" />
-          <input type="password" name="fake-pass" className="hidden" autoComplete="current-password" />
+        <div className="space-y-1">
+          <label className="text-sm text-neutral-300">Usuario</label>
+          <input
+            className="w-full rounded-md bg-neutral-800 border border-neutral-700 px-3 py-2 outline-none"
+            autoComplete="username"
+            value={username}
+            onChange={(e) => setUsername(e.target.value)}
+            placeholder="admin"
+          />
+        </div>
 
-          <div>
-            <label className="label">Usuario</label>
-            <input
-              className="input"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              placeholder="usuario"
-              autoComplete="new-username"
-              inputMode="text"
-            />
-          </div>
+        <div className="space-y-1">
+          <label className="text-sm text-neutral-300">Contraseña</label>
+          <input
+            className="w-full rounded-md bg-neutral-800 border border-neutral-700 px-3 py-2 outline-none"
+            type="password"
+            autoComplete="current-password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            placeholder="********"
+          />
+        </div>
 
-          <div>
-            <label className="label">Contraseña</label>
-            <input
-              className="input"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="contraseña"
-              autoComplete="new-password"
-            />
-          </div>
+        {error && (
+          <p className="text-sm text-red-400">
+            {error}
+          </p>
+        )}
 
-          {err && <div className="text-red-400 text-sm">{err}</div>}
-
-          <button className="btn-primary w-full" disabled={loading || !username || !password}>
-            {loading ? "Entrando..." : "Entrar"}
-          </button>
-        </form>
-      </div>
+        <button
+          type="submit"
+          disabled={loading}
+          className="w-full rounded-md bg-emerald-600 hover:bg-emerald-500 transition-colors px-3 py-2 font-medium disabled:opacity-60"
+        >
+          {loading ? "Entrando..." : "Entrar"}
+        </button>
+      </form>
     </div>
   );
 }
