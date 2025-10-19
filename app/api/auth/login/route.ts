@@ -1,47 +1,55 @@
 // app/api/auth/login/route.ts
 import { NextRequest, NextResponse } from "next/server";
 import { adminCookie, signAdminJWT } from "@/lib/auth";
-import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
+import { getAdminClient } from "@/lib/supabaseAdmin"; // <-- nombre correcto
 import bcrypt from "bcryptjs";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json().catch(() => ({}));
-    const username = String(body?.username ?? "").trim();
-    const password = String(body?.password ?? "").trim();
+    // Acepta JSON o form-data
+    const ct = req.headers.get("content-type") || "";
+    let username = "";
+    let password = "";
 
-    if (!username || !password) {
-      return NextResponse.json(
-        { ok: false, message: "Usuario y contraseña son requeridos" },
-        { status: 400 }
-      );
+    if (ct.includes("application/json")) {
+      const body = await req.json();
+      username = String(body?.username || "");
+      password = String(body?.password || "");
+    } else {
+      const form = await req.formData();
+      username = String(form.get("username") || "");
+      password = String(form.get("password") || "");
     }
 
-    const sb = getSupabaseAdmin();
-    const { data: admin, error } = await sb
+    if (!username || !password) {
+      return NextResponse.json({ error: "Missing credentials" }, { status: 400 });
+    }
+
+    const supabase = getAdminClient();
+
+    // Busca admin por username
+    const { data: admin, error } = await supabase
       .from("admins")
-      .select("id, username, password_hash, is_active")
+      .select("id, username, password_hash")
       .eq("username", username)
       .maybeSingle();
 
-    if (error || !admin || !admin.is_active) {
-      return NextResponse.json(
-        { ok: false, message: "Credenciales inválidas" },
-        { status: 401 }
-      );
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+    if (!admin) {
+      return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
     }
 
+    // Compara hash
     const ok = await bcrypt.compare(password, admin.password_hash);
     if (!ok) {
-      return NextResponse.json(
-        { ok: false, message: "Credenciales inválidas" },
-        { status: 401 }
-      );
+      return NextResponse.json({ error: "Invalid credentials" }, { status: 401 });
     }
 
-    // Firmamos JWT con { sub, username }
+    // Firma JWT y guarda cookie httpOnly
     const token = await signAdminJWT({ sub: admin.id, username: admin.username });
 
     const res = NextResponse.json({ ok: true });
@@ -49,15 +57,16 @@ export async function POST(req: NextRequest) {
       name: adminCookie,
       value: token,
       httpOnly: true,
-      // MUY IMPORTANTE: solo secure en producción para que en localhost se guarde la cookie
-      secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
       path: "/",
-      maxAge: 60 * 60 * 24 * 30, // 30 días
+      secure: true,
+      maxAge: 60 * 60 * 24 * 7, // 7 días
     });
     return res;
-  } catch (err) {
-    console.error(err);
-    return NextResponse.json({ ok: false, message: "Server error" }, { status: 500 });
+  } catch (e: any) {
+    return NextResponse.json(
+      { error: e?.message || "Login error" },
+      { status: 500 }
+    );
   }
 }
