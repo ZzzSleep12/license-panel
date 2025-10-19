@@ -1,59 +1,49 @@
-import { NextResponse } from "next/server";
-import { signJwt } from "@/lib/jwt";
+import { NextRequest, NextResponse } from "next/server";
+import { adminCookie, signAdminJWT } from "@/lib/auth";
+import { getSupabaseAdmin } from "@/lib/supabaseAdmin";
+import bcrypt from "bcryptjs";
 
-export const dynamic = "force-dynamic";
-
-export async function POST(req: Request) {
+export async function POST(req: NextRequest) {
   try {
     const { username, password } = await req.json();
 
-    const adminUser = process.env.ADMIN_USER || "admin";
-    const adminPass = process.env.ADMIN_PASS || "Papasconsal12";
+    if (!username || !password) {
+      return NextResponse.json({ ok: false, error: "missing" }, { status: 400 });
+    }
 
-    // 1) Usuario/clave “maestro”
-    let ok = username === adminUser && password === adminPass;
+    // 1) Usuario maestro por variables de entorno (fallback)
+    const envUser = process.env.ADMIN_USER || "admin";
+    const envPass = process.env.ADMIN_PASS || "Papasconsal12";
+    let ok = false;
 
-    // 2) (Opcional) validar contra tabla "admins" en Supabase (texto plano simple)
-    if (!ok) {
-      const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-      const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-      if (url && key) {
-        const { createClient } = await import("@supabase/supabase-js");
-        const supabase = createClient(url, key);
-        const { data } = await supabase
-          .from("admins")
-          .select("username,password,active")
-          .eq("username", username)
-          .eq("active", true)
-          .maybeSingle();
-        if (data && data.password === password) ok = true;
+    if (username === envUser && password === envPass) {
+      ok = true;
+    } else {
+      // 2) O buscar en tabla admins (username único) con hash bcrypt
+      const supabase = getSupabaseAdmin();
+      const { data, error } = await supabase
+        .from("admins")
+        .select("username, password_hash")
+        .eq("username", username)
+        .maybeSingle();
+      if (!error && data?.password_hash) {
+        ok = await bcrypt.compare(password, data.password_hash);
       }
     }
 
     if (!ok) {
-      return NextResponse.json(
-        { ok: false, error: "Credenciales inválidas" },
-        { status: 401 }
-      );
+      return NextResponse.json({ ok: false, error: "invalid" }, { status: 401 });
     }
 
-    const token = await signJwt({ sub: username, role: "admin" }, "7d");
-
+    const token = await signAdminJWT(username);
     const res = NextResponse.json({ ok: true });
     res.cookies.set({
-      name: "auth",
+      name: adminCookie.name,
       value: token,
-      httpOnly: true,
-      sameSite: "lax",
-      secure: true, // Vercel usa HTTPS
-      path: "/",
-      maxAge: 60 * 60 * 24 * 7, // 7 días
+      ...adminCookie.options,
     });
     return res;
-  } catch (e: any) {
-    return NextResponse.json(
-      { ok: false, error: e?.message || "Error" },
-      { status: 500 }
-    );
+  } catch (e) {
+    return NextResponse.json({ ok: false, error: "server" }, { status: 500 });
   }
 }

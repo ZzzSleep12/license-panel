@@ -1,98 +1,87 @@
-// app/admin/generate/page.tsx
 "use client";
 
-import * as React from "react";
 import { useState } from "react";
 
 export default function GeneratePage() {
+  const [qty, setQty] = useState(1);
+  const [days, setDays] = useState(30);
+  const [maxPerCode, setMaxPerCode] = useState(1);
+  const [notes, setNotes] = useState("");
   const [loading, setLoading] = useState(false);
 
-  async function onSubmit(e: React.FormEvent<HTMLFormElement>) {
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     try {
-      const form = new FormData(e.currentTarget);
-      const count = Number(form.get("count") ?? 1);
-      const duration_days = Number(form.get("duration_days") ?? 0);
-      const max_uses = Number(form.get("max_uses") ?? 1);
-      const notes = String(form.get("notes") ?? "").trim() || null;
-
       const res = await fetch("/api/admin/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ count, duration_days, max_uses, notes }),
-      }).then((r) => r.json());
-
-      if (!res.ok) {
-        alert(res.error ?? "No se pudo generar");
-      } else {
-        const codes = (res.items ?? []).map((r: any) => r.code).join("\n");
-        alert(`Generadas: ${(res.items ?? []).length}\n\n${codes}`);
-      }
+        // IMPORTANTE: envía cookies de sesión
+        credentials: "include",
+        body: JSON.stringify({
+          qty: Number(qty),
+          duration_days: Number(days),
+          max_uses: Number(maxPerCode),
+          notes: notes || null,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok || !json.ok) throw new Error(json.error || "Unauthorized");
+      alert(`Generados: ${json.codes?.length ?? 0} códigos`);
     } catch (err: any) {
-      alert(err?.message ?? "Error inesperado");
+      alert(err?.message || "Error");
     } finally {
       setLoading(false);
     }
-  }
+  };
 
   return (
     <div className="max-w-2xl mx-auto px-4 py-8">
       <h1 className="text-xl font-semibold mb-4">Generar licencias</h1>
-
-      <form onSubmit={onSubmit} className="space-y-4">
-        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <label className="block">
-            <span className="block text-sm mb-1">Cantidad</span>
-            <input
-              name="count"
-              type="number"
-              min={1}
-              defaultValue={5}
-              className="w-full rounded border border-white/10 bg-black/20 px-3 py-2 outline-none"
-              required
-            />
-          </label>
-
-          <label className="block">
-            <span className="block text-sm mb-1">
-              Duración (días) — 0 = sin caducidad
-            </span>
-            <input
-              name="duration_days"
-              type="number"
-              min={0}
-              defaultValue={30}
-              className="w-full rounded border border-white/10 bg-black/20 px-3 py-2 outline-none"
-              required
-            />
-          </label>
-
-          <label className="block">
-            <span className="block text-sm mb-1">Usos máx. por código</span>
-            <input
-              name="max_uses"
-              type="number"
-              min={1}
-              defaultValue={1}
-              className="w-full rounded border border-white/10 bg-black/20 px-3 py-2 outline-none"
-              required
-            />
-          </label>
-        </div>
-
-        <label className="block">
-          <span className="block text-sm mb-1">Notas (opcional)</span>
+      <form onSubmit={submit} className="grid gap-4">
+        <label className="grid gap-1">
+          <span className="text-sm opacity-70">Cantidad</span>
           <input
-            name="notes"
+            type="number"
+            min={1}
+            value={qty}
+            onChange={(e) => setQty(Number(e.target.value))}
+            className="rounded border border-white/10 bg-black/20 px-3 py-2 outline-none"
+          />
+        </label>
+        <label className="grid gap-1">
+          <span className="text-sm opacity-70">Duración (días) — 0 = sin caducidad</span>
+          <input
+            type="number"
+            min={0}
+            value={days}
+            onChange={(e) => setDays(Number(e.target.value))}
+            className="rounded border border-white/10 bg-black/20 px-3 py-2 outline-none"
+          />
+        </label>
+        <label className="grid gap-1">
+          <span className="text-sm opacity-70">Usos máx. por código</span>
+          <input
+            type="number"
+            min={1}
+            value={maxPerCode}
+            onChange={(e) => setMaxPerCode(Number(e.target.value))}
+            className="rounded border border-white/10 bg-black/20 px-3 py-2 outline-none"
+          />
+        </label>
+        <label className="grid gap-1">
+          <span className="text-sm opacity-70">Notas (opcional)</span>
+          <input
+            value={notes}
+            onChange={(e) => setNotes(e.target.value)}
             placeholder="Ej: Plan mensual"
-            className="w-full rounded border border-white/10 bg-black/20 px-3 py-2 outline-none"
+            className="rounded border border-white/10 bg-black/20 px-3 py-2 outline-none"
           />
         </label>
 
         <button
           disabled={loading}
-          className="rounded bg-blue-600 hover:bg-blue-700 px-4 py-2 text-sm disabled:opacity-60"
+          className="rounded bg-blue-600 hover:bg-blue-700 px-4 py-2 text-sm disabled:opacity-50"
         >
           {loading ? "Generando..." : "Generar"}
         </button>
