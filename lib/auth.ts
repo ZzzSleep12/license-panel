@@ -5,14 +5,19 @@ import { SignJWT, jwtVerify } from "jose";
 
 export const adminCookie = "lp_admin";
 
-const ADMIN_JWT_SECRET = process.env.ADMIN_JWT_SECRET;
-if (!ADMIN_JWT_SECRET) {
-  throw new Error("Missing env ADMIN_JWT_SECRET");
+// Obtenemos el secreto de forma perezosa para no romper el build
+function getAdminSecretKey() {
+  const secret = process.env.ADMIN_JWT_SECRET;
+  if (!secret) {
+    // Se valida en tiempo de ejecución (cuando se use), no en build
+    throw new Error("ADMIN_JWT_SECRET is not set");
+  }
+  return new TextEncoder().encode(secret);
 }
-const secretKey = new TextEncoder().encode(ADMIN_JWT_SECRET);
 
 /** Firma un JWT para el admin (expira en 30 días) */
 export async function signAdminJWT(payload: { sub: string; username: string }) {
+  const secretKey = getAdminSecretKey();
   const token = await new SignJWT(payload)
     .setProtectedHeader({ alg: "HS256", typ: "JWT" })
     .setIssuedAt()
@@ -26,10 +31,10 @@ export async function verifyAdminFromRequest(req: NextRequest) {
   const cookie = req.cookies.get(adminCookie)?.value;
   if (!cookie) return null;
   try {
+    const secretKey = getAdminSecretKey();
     const { payload } = await jwtVerify(cookie, secretKey, {
       algorithms: ["HS256"],
     });
-    // payload.sub y payload.username deberían existir
     if (!payload?.sub || typeof payload.sub !== "string") return null;
     return {
       sub: payload.sub as string,
@@ -57,6 +62,7 @@ export async function getAdminFromCookies() {
   const token = jar.get(adminCookie)?.value;
   if (!token) return null;
   try {
+    const secretKey = getAdminSecretKey();
     const { payload } = await jwtVerify(token, secretKey, {
       algorithms: ["HS256"],
     });
