@@ -28,6 +28,7 @@ export default function GeneratePage() {
       });
 
       const data = await resp.json();
+
       if (!resp.ok || !data?.ok) {
         alert(data?.error || "Error generando licencias");
         return;
@@ -36,7 +37,8 @@ export default function GeneratePage() {
       const count: number = Number(data.count ?? 0);
       alert(`Generados: ${count} códigos`);
 
-      // Volver al dashboard (lista se recarga con no-store)
+      // refresca datos y regresa al dashboard
+      router.refresh();
       router.push("/admin");
     } catch (err: any) {
       alert(err?.message || "Error");
