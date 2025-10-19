@@ -1,117 +1,77 @@
 // app/admin/generate/page.tsx
 "use client";
 
-import { useState } from "react";
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 export default function GeneratePage() {
-  const [count, setCount] = useState<number>(1);
-  const [durationDays, setDurationDays] = useState<number>(30);
-  const [maxUses, setMaxUses] = useState<number>(1);
-  const [notes, setNotes] = useState<string>("");
-  const [loading, setLoading] = useState(false);
+  const router = useRouter();
 
-  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    if (loading) return;
-    setLoading(true);
-    try {
-      const res = await fetch("/api/admin/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include", // envía la cookie de admin
-        body: JSON.stringify({
-          count: Number(count),
-          durationDays: Number(durationDays),
-          maxUses: Number(maxUses),
-          notes: notes.trim(),
-        }),
-      });
+  async function onSubmit(formData: FormData) {
+    const qty = Number(formData.get("qty") || 1);
+    const days = Number(formData.get("days") || 0);
+    const max_uses = Number(formData.get("max_uses") || 1);
+    const notes = String(formData.get("notes") || "");
 
-      const j = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        alert(j?.error || "No se pudo generar");
-        return;
-      }
-
-      alert(`Generados: ${j.generated} códigos`);
-      // Opcional: vuelve al dashboard
-      window.location.href = "/admin";
-    } catch (err: any) {
-      alert(err?.message || "Error inesperado");
-    } finally {
-      setLoading(false);
-    }
+    const res = await fetch("/api/admin/generate", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ qty, days, max_uses, notes }),
+    });
+    const j = await res.json();
+    if (!j.ok) return alert(j.error || "Error");
+    alert(`Generados: ${j.generated.length} códigos`);
+    router.push("/admin");
   }
 
   return (
-    <div className="max-w-xl mx-auto space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">Generar licencias</h1>
-        <Link
-          href="/admin"
-          className="rounded-md bg-neutral-800 px-3 py-2 border border-neutral-700 hover:bg-neutral-700"
-        >
-          ← Volver
-        </Link>
-      </div>
+    <div className="mx-auto max-w-xl p-6 text-neutral-200">
+      <h1 className="mb-6 text-2xl font-semibold">Generar licencias</h1>
 
-      <form
-        onSubmit={handleSubmit}
-        className="space-y-4 rounded-xl border border-neutral-800 bg-neutral-900 p-5"
-      >
-        <div className="space-y-1">
-          <label className="text-sm text-neutral-300">Cantidad</label>
+      <form action={onSubmit} className="space-y-4 rounded-xl border border-neutral-800 bg-neutral-900 p-5">
+        <div>
+          <label className="text-sm text-neutral-400">Cantidad</label>
           <input
-            type="number"
+            name="qty"
+            defaultValue={1}
             min={1}
-            max={100}
-            value={count}
-            onChange={(e) => setCount(Number(e.target.value))}
-            className="w-full rounded-md bg-neutral-800 px-3 py-2 outline-none border border-neutral-700 focus:border-neutral-500"
+            type="number"
+            className="mt-1 w-full rounded-md border border-neutral-700 bg-black/30 px-3 py-2 outline-none"
           />
         </div>
 
-        <div className="space-y-1">
-          <label className="text-sm text-neutral-300">
-            Duración (días) — 0 = sin caducidad
-          </label>
+        <div>
+          <label className="text-sm text-neutral-400">Duración (días) — 0 = sin caducidad</label>
           <input
-            type="number"
+            name="days"
+            defaultValue={30}
             min={0}
-            value={durationDays}
-            onChange={(e) => setDurationDays(Number(e.target.value))}
-            className="w-full rounded-md bg-neutral-800 px-3 py-2 outline-none border border-neutral-700 focus:border-neutral-500"
-          />
-        </div>
-
-        <div className="space-y-1">
-          <label className="text-sm text-neutral-300">Usos máx. por código</label>
-          <input
             type="number"
-            min={1}
-            value={maxUses}
-            onChange={(e) => setMaxUses(Number(e.target.value))}
-            className="w-full rounded-md bg-neutral-800 px-3 py-2 outline-none border border-neutral-700 focus:border-neutral-500"
+            className="mt-1 w-full rounded-md border border-neutral-700 bg-black/30 px-3 py-2 outline-none"
           />
         </div>
 
-        <div className="space-y-1">
-          <label className="text-sm text-neutral-300">Notas (opcional)</label>
+        <div>
+          <label className="text-sm text-neutral-400">Usos máx. por código</label>
           <input
-            value={notes}
-            onChange={(e) => setNotes(e.target.value)}
-            placeholder="Ej: Plan mensual"
-            className="w-full rounded-md bg-neutral-800 px-3 py-2 outline-none border border-neutral-700 focus:border-neutral-500"
+            name="max_uses"
+            defaultValue={1}
+            min={1}
+            type="number"
+            className="mt-1 w-full rounded-md border border-neutral-700 bg-black/30 px-3 py-2 outline-none"
           />
         </div>
 
-        <button
-          type="submit"
-          disabled={loading}
-          className="w-full rounded-md bg-blue-600 px-4 py-2 hover:bg-blue-500 disabled:opacity-60"
-        >
-          {loading ? "Generando..." : "Generar"}
+        <div>
+          <label className="text-sm text-neutral-400">Notas (opcional)</label>
+          <input
+            name="notes"
+            placeholder="Ej: Plan mensual"
+            className="mt-1 w-full rounded-md border border-neutral-700 bg-black/30 px-3 py-2 outline-none"
+          />
+        </div>
+
+        <button className="w-full rounded-md bg-blue-600 py-2 font-medium text-white">
+          Generar…
         </button>
       </form>
     </div>
