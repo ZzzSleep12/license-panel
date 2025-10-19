@@ -34,11 +34,17 @@ export default function GeneratePage() {
         return;
       }
 
-      const count: number = Number(data.count ?? 0);
-      alert(`Generados: ${count} códigos`);
+      const codes: string[] = Array.isArray(data.items)
+        ? data.items.map((i: any) => i.code)
+        : [];
 
-      // refresca datos y regresa al dashboard
-      router.refresh();
+      // Muestra cuántos y además los códigos generados (útil para verificar)
+      alert(
+        `Generados: ${data.count} códigos\n\n` +
+          (codes.length ? codes.join("\n") : "")
+      );
+
+      router.refresh(); // actualiza el dashboard
       router.push("/admin");
     } catch (err: any) {
       alert(err?.message || "Error");
@@ -51,7 +57,10 @@ export default function GeneratePage() {
     <div className="mx-auto max-w-xl p-6">
       <h1 className="mb-4 text-2xl font-semibold">Generar licencias</h1>
 
-      <form onSubmit={onSubmit} className="space-y-4 rounded-xl border border-neutral-800 bg-neutral-900 p-5">
+      <form
+        onSubmit={onSubmit}
+        className="space-y-4 rounded-xl border border-neutral-800 bg-neutral-900 p-5"
+      >
         <div className="space-y-1">
           <label className="text-sm text-neutral-300">Cantidad</label>
           <input
@@ -65,7 +74,9 @@ export default function GeneratePage() {
         </div>
 
         <div className="space-y-1">
-          <label className="text-sm text-neutral-300">Duración (días) — 0 = sin caducidad</label>
+          <label className="text-sm text-neutral-300">
+            Duración (días) — 0 = sin caducidad
+          </label>
           <input
             name="days"
             type="number"
